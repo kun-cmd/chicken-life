@@ -108,8 +108,7 @@ body {
 }
 
 .time-capsule,
-.hud-dock,
-.today-plate,
+.minimal-hud,
 .goal-tip {
   position: absolute;
   border: 1px solid rgba(232, 242, 221, 0.18);
@@ -119,6 +118,48 @@ body {
     rgba(20, 26, 24, 0.48);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(14px) saturate(1.08);
+}
+
+.minimal-hud {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: grid;
+  gap: 8px;
+  width: min(210px, calc(100vw - 32px));
+  padding: 10px;
+}
+
+.wood-chip,
+.sprint-wrap {
+  display: grid;
+  align-items: center;
+  gap: 7px;
+  color: rgba(255, 246, 214, 0.78);
+  font-size: 12px;
+}
+
+.wood-chip {
+  grid-template-columns: 1fr auto;
+}
+
+.wood-chip b {
+  min-width: 28px;
+  color: white;
+  text-align: right;
+  font-size: 15px;
+}
+
+.sprint-wrap[hidden] {
+  display: none;
+}
+
+.sprint-wrap .meter-track {
+  height: 6px;
+}
+
+.sprint-wrap .meter-track i {
+  background: linear-gradient(90deg, #d1bdf6, #ffe7a0);
 }
 
 .time-capsule {
@@ -731,10 +772,10 @@ body[data-phase='night'] #game {
     min-width: min(220px, calc(100vw - 24px));
   }
 
-  .hud-dock {
+  .minimal-hud {
     top: 70px;
     left: 12px;
-    width: calc(100vw - 24px);
+    width: 172px;
     padding: 9px;
   }
 
@@ -770,7 +811,7 @@ body[data-phase='night'] #game {
   .goal-tip {
     top: auto;
     right: 12px;
-    bottom: 126px;
+    bottom: 18px;
     width: min(360px, calc(100vw - 24px));
   }
 
@@ -780,7 +821,7 @@ body[data-phase='night'] #game {
   }
 
   .toast {
-    bottom: 126px;
+    bottom: 76px;
   }
 
   .summary-panel {

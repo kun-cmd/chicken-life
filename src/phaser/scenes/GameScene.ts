@@ -3,6 +3,7 @@ import {
   BLOCKERS,
   COOP,
   COOP_DOOR,
+  FLUTTER_TARGETS,
   HOUSE,
   HOUSE_PATH,
   MAIN_PATH,
@@ -17,6 +18,8 @@ import {
   isNearPond,
   isOnPath,
 } from '../../game/content/yard';
+import { tutorialForAbility } from '../../game/content/abilityTutorials';
+import { canUseAbility } from '../../game/systems/abilities';
 import {
   LEGACY_SAVE_KEY,
   SAVE_KEY,
@@ -30,6 +33,7 @@ import {
   callKeeperForWeasel,
   cluckAt,
   collectEgg,
+  completeAbilityTutorial,
   createGameState,
   debugAddAffection,
   debugAddMaterials,
@@ -51,6 +55,7 @@ import {
   restInHole,
   restoreGameState,
   setChickenName,
+  spawnScratchWorm,
   overstuffRatioFor,
   spendStamina,
   updateAnimals,
@@ -103,6 +108,7 @@ const GAMEPLAY_KEY_CODES = new Set([
   'ShiftRight',
   'Space',
   'KeyE',
+  'KeyF',
   'KeyQ',
   'Enter',
 ]);
@@ -157,6 +163,7 @@ export class GameScene extends Phaser.Scene {
   private nightResultTimer = 0;
   private peckCooldown = 0;
   private digCooldown = 0;
+  private scratchProgress = 0;
   private drinkSfxCooldown = 0;
   private caughtCooldown = 0;
   private chickenLiftTimer = 0;
@@ -365,23 +372,37 @@ export class GameScene extends Phaser.Scene {
     return {
       x: (right ? 1 : 0) - (left ? 1 : 0),
       y: (down ? 1 : 0) - (up ? 1 : 0),
-      sprint: this.keyboardState.isDown('ShiftLeft') || this.keyboardState.isDown('ShiftRight'),
-      peck: spacePressed,
-      digOrRest: this.keyboardState.isDown('KeyE'),
-      interact: interactPressed,
-      search: spacePressed || enterPressed,
-      call: this.keyboardState.consumePress('KeyQ'),
+      sprintHeld: this.keyboardState.isDown('ShiftLeft') || this.keyboardState.isDown('ShiftRight'),
+      peckPressed: spacePressed,
+      scratchHeld: this.keyboardState.isDown('KeyE'),
+      flutterPressed: this.keyboardState.consumePress('KeyF'),
+      interactPressed,
+      searchPressed: spacePressed || enterPressed,
+      callPressed: this.keyboardState.consumePress('KeyQ'),
     };
   }
 
   private updateChicken(dt: number, actions: InputActions) {
     let actionSeconds = 0;
+    this.updateMovingFoods(dt);
+    if (this.state.body.fluttering) {
+      this.advanceChickenWorld(dt * 0.35);
+      return;
+    }
     const direction = normalize(actions.x, actions.y);
     const hasMove = direction.x !== 0 || direction.y !== 0;
-    const stuffedDrag = 1 - overstuffRatioFor(this.state) * 0.2;
-    const canSprint = actions.sprint && this.state.stats.stamina > 6 && hasMove;
+    const sprintTutorial = this.state.activeAbilityTutorial === 'sprint';
+    const tutorialPoint = tutorialForAbility('sprint')!.position;
+    const atSprintTutorial = sprintTutorial && distance(this.state.chicken, tutorialPoint) < 105;
+    const canSprint =
+      (canUseAbility(this.state.profile, 'sprint') || atSprintTutorial) &&
+      actions.sprintHeld &&
+      this.state.foraging.sprintEnergy > 0 &&
+      hasMove;
     const speed =
-      this.state.stats.speed * stuffedDrag * (canSprint ? 1.52 : 1) * (isOnPath(this.state.chicken) ? 1.06 : 1);
+      this.state.body.walkSpeed *
+      (canSprint ? this.state.body.sprintMultiplier : 1) *
+      (isOnPath(this.state.chicken) ? 1.06 : 1);
 
     if (hasMove) {
       const target = {
@@ -395,16 +416,32 @@ export class GameScene extends Phaser.Scene {
       this.chicken.scaleX = direction.x < -0.05 ? -1 : direction.x > 0.05 ? 1 : this.chicken.scaleX;
     }
     if (canSprint) {
-      spendStamina(this.state, 26 * dt);
+      this.state.foraging.sprintEnergy = Math.max(0, this.state.foraging.sprintEnergy - 30 * dt);
+      if (atSprintTutorial && completeAbilityTutorial(this.state, 'sprint')) {
+        this.playSfx(SFX_UPGRADE_KEY, 0.62);
+        this.saveGame(true);
+      }
     } else {
-      recoverStamina(this.state, (hasMove ? 18 : 34) * dt);
+      this.state.foraging.sprintEnergy = Math.min(
+        this.state.foraging.maxSprintEnergy,
+        this.state.foraging.sprintEnergy + 7 * dt,
+      );
     }
 
     actionSeconds += this.handleChickenActions(dt, actions);
+    if (actions.callPressed && this.state.flow.phase !== 'chicken-dusk') {
+      const result = cluckAt(this.state, this.state.chicken);
+      for (const droppedFood of result.droppedFoods) {
+        this.foodViews.set(droppedFood.id, this.createFoodView(droppedFood));
+      }
+      this.showCluckFx(this.state.chicken, result.scaredIds.length);
+      this.scareAnimalViews(result.scaredIds);
+      actionSeconds += 0.8;
+    }
     this.advanceChickenWorld(actionSeconds);
     if (this.updateRealtimeThreats(dt)) return;
 
-    if (actions.call && this.state.flow.phase === 'chicken-dusk') {
+    if (actions.callPressed && this.state.flow.phase === 'chicken-dusk') {
       applyFlowEvent(this.state, { type: 'call-human' });
       this.state.message = `${this.state.profile.name}叫了几声，养鸡人从屋里出来了。`;
       this.switchToHuman();
@@ -414,39 +451,54 @@ export class GameScene extends Phaser.Scene {
 
   private handleChickenActions(dt: number, actions: InputActions) {
     let actionSeconds = 0;
-    if (actions.digOrRest && isNearPond(this.state.chicken)) {
-      if (drinkAtPond(this.state, dt * 1.25)) {
-        actionSeconds += dt * 2.4;
-        if (this.drinkSfxCooldown <= 0) {
-          this.playSfx(SFX_DRINK_KEY, 0.46);
-          this.drinkSfxCooldown = 0.85;
-        }
-        this.showDrinkRipples(this.state.chicken);
-        return actionSeconds;
-      }
-    }
+    const scratchTutorial = this.state.activeAbilityTutorial === 'scratch';
+    const scratchPoint = tutorialForAbility('scratch')!.position;
+    const atScratchTutorial = scratchTutorial && distance(this.state.chicken, scratchPoint) < 82;
+    const canScratchHere =
+      (canUseAbility(this.state.profile, 'scratch') && !isOnPath(this.state.chicken)) || atScratchTutorial;
 
-    const nearestHole = this.nearestHole(34);
-    if (actions.digOrRest && nearestHole) {
-      restInHole(this.state, nearestHole, dt * 1.35);
-      actionSeconds += dt * 3.2;
-      this.showRestPuffs(nearestHole);
-      return actionSeconds;
-    }
-
-    if (actions.digOrRest && this.digCooldown <= 0 && !isOnPath(this.state.chicken)) {
-      const hole = digHole(this.state, this.state.chicken);
-      if (hole) {
-        this.addHoleView(hole);
-        this.digCooldown = 0.65;
+    if (actions.scratchHeld && canScratchHere && this.digCooldown <= 0) {
+      this.scratchProgress += dt;
+      actionSeconds += dt * 1.4;
+      if (this.scratchProgress >= 0.65) {
+        const worm = spawnScratchWorm(this.state, {
+          x: this.state.chicken.x + (this.chicken.scaleX >= 0 ? 24 : -24),
+          y: this.state.chicken.y + 10,
+        });
+        this.foodViews.set(worm.id, this.createFoodView(worm));
+        this.scratchProgress = 0;
+        this.digCooldown = 2.2;
         this.playSfx(SFX_DIG_KEY, 0.54);
         this.cameras.main.shake(70, 0.002);
-        actionSeconds += 11;
+        if (atScratchTutorial && completeAbilityTutorial(this.state, 'scratch')) {
+          this.playSfx(SFX_UPGRADE_KEY, 0.62);
+          this.saveGame(true);
+        }
       }
       return actionSeconds;
     }
+    if (!actions.scratchHeld) this.scratchProgress = 0;
 
-    if (actions.peck && this.peckCooldown <= 0) {
+    if (actions.flutterPressed) {
+      const target = this.nearestFlutterTarget(72);
+      const isTutorialTarget =
+        this.state.activeAbilityTutorial === 'flutter' &&
+        !!target &&
+        distance(target, tutorialForAbility('flutter')!.position) < 2;
+      if (target && (canUseAbility(this.state.profile, 'flutter') || isTutorialTarget)) {
+        this.performFlutter(target);
+        if (isTutorialTarget && completeAbilityTutorial(this.state, 'flutter')) {
+          this.playSfx(SFX_UPGRADE_KEY, 0.62);
+          this.saveGame(true);
+        }
+        return 2.2;
+      }
+      this.state.message = canUseAbility(this.state.profile, 'flutter')
+        ? '这里没有适合扑翅跳上的矮桩。'
+        : '翅膀还没找到发力的感觉。';
+    }
+
+    if (actions.peckPressed && this.peckCooldown <= 0) {
       const food = this.nearestFood(40);
       if (food) {
         const result = peckFood(this.state, food);
@@ -465,7 +517,7 @@ export class GameScene extends Phaser.Scene {
           this.showGroundPeck();
           actionSeconds += 0.9;
         }
-        this.peckCooldown = food.type === 'sunflower' ? 0.18 : food.type === 'meat' ? 0.22 : 0.26;
+        this.peckCooldown = food.type === 'sunflower' ? 0.18 : 0.26;
       } else {
         if ((this.state.phase === 'dusk' || this.state.phase === 'night') && this.state.weasel.active) {
           const called = callKeeperForWeasel(this.state);
@@ -496,7 +548,6 @@ export class GameScene extends Phaser.Scene {
   private advanceChickenWorld(actionSeconds: number) {
     if (actionSeconds <= 0) return;
     applyFlowEvent(this.state, { type: 'tick', amount: actionSeconds / 155 });
-    updateWaterBoost(this.state, actionSeconds);
     const actorSeconds = Math.min(actionSeconds, 0.08);
     const newSeed = updateKeeper(this.state, actorSeconds, actionSeconds);
     if (newSeed) {
@@ -511,18 +562,7 @@ export class GameScene extends Phaser.Scene {
     for (const spawnedFood of foodUpdate.spawnedFoods) {
       this.foodViews.set(spawnedFood.id, this.createFoodView(spawnedFood));
     }
-    const animalUpdate = updateAnimals(this.state, actionSeconds);
-    for (const stolenId of animalUpdate.stolenFoodIds) {
-      const view = this.foodViews.get(stolenId);
-      if (view) this.showStolenFoodFx({ x: view.x, y: view.y });
-      view?.destroy();
-      this.foodViews.delete(stolenId);
-    }
-    for (const spawnedFood of restockEdibleFoods(this.state)) {
-      this.foodViews.set(spawnedFood.id, this.createFoodView(spawnedFood));
-    }
     this.syncFoodViews();
-    this.syncAnimalViews();
     this.updatePressure(actionSeconds);
   }
 
@@ -541,7 +581,7 @@ export class GameScene extends Phaser.Scene {
     updateNightPressure(this.state, {
       dt,
       position,
-      staminaRatio: this.state.stats.stamina / this.state.stats.maxStamina,
+      staminaRatio: this.state.foraging.sprintEnergy / this.state.foraging.maxSprintEnergy,
       inShadow: isShadowy(position),
       onPath: isOnPath(position),
       nearCoop: distance(position, COOP_DOOR) < 150,
@@ -622,7 +662,7 @@ export class GameScene extends Phaser.Scene {
 
     updateMorningChickenWander(this.state, dt);
 
-    if (this.state.flow.morningEggFound && actions.search && nearCoop) {
+    if (this.state.flow.morningEggFound && actions.searchPressed && nearCoop) {
       applyFlowEvent(this.state, { type: 'release-chicken' });
       this.state.message = '鸡窝门打开了，今天的院子生活开始。';
       this.switchToChicken();
@@ -633,7 +673,7 @@ export class GameScene extends Phaser.Scene {
     if (this.state.egg && !this.state.egg.found) {
       const eggDistance = distance(this.state.human, this.state.egg);
       if (eggDistance < 132) this.showEggClue();
-      if (actions.search) {
+      if (actions.searchPressed) {
         searchedForEgg = true;
         if (eggDistance < 76) {
           collectEgg(this.state);
@@ -647,7 +687,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    if (actions.interact) {
+    if (actions.interactPressed) {
       if (distance(this.state.human, this.state.chicken) < 74) {
         if (hugChicken(this.state)) {
           this.chickenLiftTimer = 0.85;
@@ -661,18 +701,10 @@ export class GameScene extends Phaser.Scene {
           this.playCloseMoment();
         }
       } else {
-        this.state.message = '靠近鸡或鸡窝时按 E 可以互动。';
+        this.state.message = '靠近鸡可以抱一抱；靠近鸡窝可以用木料修缮。';
       }
     }
 
-    const usedCoopTraining = !searchedForEgg && actions.search && nearCoop;
-    if (usedCoopTraining) {
-      if (improveCoopAbility(this.state)) {
-        this.playSfx(SFX_UPGRADE_KEY, 0.62);
-        this.showRepairFx(COOP_DOOR);
-        this.playCloseMoment();
-      }
-    }
   }
 
   private updateDuskCollection(dt: number, actions: InputActions, humanNearCoop: boolean) {
@@ -692,7 +724,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     const chickenNearCoop = distance(this.state.chicken, COOP_DOOR) < 72;
-    if (actions.interact && humanNearCoop && chickenNearCoop) {
+    if (actions.interactPressed && humanNearCoop && chickenNearCoop) {
       this.state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 24 };
       applyFlowEvent(this.state, { type: 'chicken-entered-coop' });
       applyFlowEvent(this.state, { type: 'close-door' });
@@ -702,7 +734,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (actions.interact) {
+    if (actions.interactPressed) {
       this.state.message = chickenNearCoop
         ? '你也要走到鸡窝门边，才能把门关好。'
         : `先靠近${this.state.profile.name}，慢慢带它走到鸡窝门口。`;
@@ -902,6 +934,49 @@ export class GameScene extends Phaser.Scene {
     return best;
   }
 
+  private nearestFlutterTarget(radius: number) {
+    let best: Vec2 | null = null;
+    let bestDistance = radius;
+    for (const target of FLUTTER_TARGETS) {
+      const targetDistance = distance(target, this.state.chicken);
+      if (targetDistance < bestDistance) {
+        best = target;
+        bestDistance = targetDistance;
+      }
+    }
+    return best;
+  }
+
+  private performFlutter(target: Vec2) {
+    this.state.body.fluttering = true;
+    this.state.chicken = { ...target };
+    this.chickenLiftTimer = 0.75;
+    this.showCluckFx(target, 1);
+    this.time.delayedCall(460, () => {
+      this.state.body.fluttering = false;
+    });
+  }
+
+  private updateMovingFoods(dt: number) {
+    for (const food of visibleFoods(this.state)) {
+      if (!['cricket', 'beetle', 'nightBug'].includes(food.type)) continue;
+      const chickenDistance = distance(food, this.state.chicken);
+      if (chickenDistance >= 180 || chickenDistance < 1) continue;
+      const away = normalize(food.x - this.state.chicken.x, food.y - this.state.chicken.y);
+      const fleeSpeed = food.type === 'nightBug' ? 92 : 72;
+      const target = {
+        x: Phaser.Math.Clamp(food.x + away.x * fleeSpeed * dt, 40, WORLD_WIDTH - 40),
+        y: Phaser.Math.Clamp(food.y + away.y * fleeSpeed * dt, 40, WORLD_HEIGHT - 40),
+      };
+      if (!isBlocked(target, 12)) {
+        food.x = target.x;
+        food.y = target.y;
+        food.velocity = { x: away.x * fleeSpeed, y: away.y * fleeSpeed };
+        this.foodViews.get(food.id)?.setPosition(food.x, food.y);
+      }
+    }
+  }
+
   private nearestHole(radius: number) {
     let best: HoleEntity | null = null;
     let bestDistance = radius;
@@ -976,6 +1051,34 @@ export class GameScene extends Phaser.Scene {
     this.generateTexture('food-bug', 36, 32, (g) => {
       g.fillStyle(0x312418, 1).fillEllipse(17, 17, 14, 8);
       g.fillStyle(0x0f0c09, 1).fillCircle(24, 15, 2);
+    });
+    this.generateTexture('food-worm', 38, 30, (g) => {
+      g.lineStyle(5, 0xc77b72, 1);
+      g.beginPath();
+      g.moveTo(7, 20);
+      g.lineTo(15, 11);
+      g.lineTo(24, 19);
+      g.lineTo(32, 10);
+      g.strokePath();
+    });
+    this.generateTexture('food-cricket', 38, 34, (g) => {
+      g.fillStyle(0x594026, 1).fillEllipse(18, 18, 16, 9);
+      g.lineStyle(2, 0x2d2217, 1);
+      g.lineBetween(12, 22, 5, 30);
+      g.lineBetween(24, 21, 33, 29);
+      g.fillStyle(0x16130e, 1).fillCircle(27, 15, 2);
+    });
+    this.generateTexture('food-beetle', 38, 34, (g) => {
+      g.fillStyle(0x37665c, 1).fillEllipse(19, 18, 17, 12);
+      g.lineStyle(2, 0xb1d294, 0.8);
+      g.lineBetween(19, 8, 19, 28);
+      g.fillStyle(0x1c2b24, 1).fillCircle(28, 17, 3);
+    });
+    this.generateTexture('food-berry', 38, 38, (g) => {
+      g.fillStyle(0xb4475d, 1).fillCircle(16, 21, 7);
+      g.fillCircle(23, 18, 7);
+      g.fillCircle(22, 26, 7);
+      g.fillStyle(0x5e8b47, 1).fillTriangle(18, 14, 25, 5, 29, 15);
     });
     this.generateTexture('food-nightBug', 36, 36, (g) => {
       g.fillStyle(0x7aa7ff, 0.45).fillCircle(18, 18, 8);
