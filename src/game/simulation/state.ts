@@ -15,6 +15,11 @@ import {
   isNearPond,
   isOnPath,
 } from '../content/yard';
+import {
+  createChickenProfile,
+  normalizeChickenName,
+  type ChickenProfile,
+} from '../profile/chickenProfile';
 
 export type Phase = 'day' | 'dusk' | 'night' | 'human';
 export type PlayerMode = 'chicken' | 'human';
@@ -140,6 +145,8 @@ export interface ChickenWanderState {
 }
 
 export interface GameState {
+  profile: ChickenProfile;
+  saveAvailable: boolean;
   day: number;
   phase: Phase;
   mode: PlayerMode;
@@ -193,6 +200,9 @@ export interface PressureContext {
 }
 
 export interface HudSnapshot {
+  chickenName: string;
+  requiresNaming: boolean;
+  saveAvailable: boolean;
   day: number;
   phase: Phase;
   mode: PlayerMode;
@@ -257,6 +267,8 @@ const RESTOCK_FOOD_COUNT = 3;
 
 export function createGameState(): GameState {
   const state: GameState = {
+    profile: createChickenProfile(),
+    saveAvailable: true,
     day: 1,
     phase: 'day',
     mode: 'chicken',
@@ -337,6 +349,12 @@ export function createGameState(): GameState {
 
   spawnDailyFood(state);
   return state;
+}
+
+export function setChickenName(state: GameState, input: string) {
+  state.profile.name = normalizeChickenName(input);
+  state.profile.named = true;
+  state.message = `从今天起，它叫${state.profile.name}。`;
 }
 
 export function advanceChickenTime(state: GameState, dt: number) {
@@ -1060,6 +1078,9 @@ export function startNextDay(state: GameState) {
 
 export function buildHudSnapshot(state: GameState, consumeTransient = true): HudSnapshot {
   const snapshot: HudSnapshot = {
+    chickenName: state.profile.name,
+    requiresNaming: !state.profile.named,
+    saveAvailable: state.saveAvailable,
     day: state.day,
     phase: state.phase,
     mode: state.mode,
@@ -1170,6 +1191,15 @@ export function restoreGameState(saved: unknown): GameState {
   const restored: GameState = {
     ...fresh,
     ...input,
+    profile: {
+      ...fresh.profile,
+      ...(input.profile ?? {}),
+      awakenedAbilities: {
+        ...fresh.profile.awakenedAbilities,
+        ...(input.profile?.awakenedAbilities ?? {}),
+      },
+    },
+    saveAvailable: input.saveAvailable ?? true,
     chicken: { ...fresh.chicken, ...(input.chicken ?? {}) },
     human: { ...fresh.human, ...(input.human ?? {}) },
     chickenWander: { ...fresh.chickenWander, ...(input.chickenWander ?? {}) },
