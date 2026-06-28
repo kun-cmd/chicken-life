@@ -17,7 +17,12 @@ import {
   isNearPond,
   isOnPath,
 } from '../../game/content/yard';
-import type { EggType, FoodEntity, GameState, HoleEntity, Vec2, YardAnimal } from '../../game/simulation/state';
+import {
+  LEGACY_SAVE_KEY,
+  SAVE_KEY,
+  loadSaveEnvelope,
+  writeSaveEnvelope,
+} from '../../game/persistence/saveGame';
 import {
   advanceChickenTime,
   buildHudSnapshot,
@@ -44,6 +49,7 @@ import {
   restockEdibleFoods,
   restInHole,
   restoreGameState,
+  setChickenName,
   overstuffRatioFor,
   spendStamina,
   startNextDay,
@@ -55,6 +61,7 @@ import {
   updateNightPressure,
   visibleFoods,
 } from '../../game/simulation/state';
+import type { EggType, FoodEntity, HoleEntity, Vec2, YardAnimal } from '../../game/simulation/state';
 import type { InputActions } from '../../game/input/actions';
 import { KeyboardState } from '../../game/input/keyboardState';
 
@@ -68,7 +75,6 @@ type DebugAction =
   | { action: 'forceEgg'; eggType: EggType }
   | { action: 'clearSave' };
 
-const SAVE_KEY = 'chicken-life-save-v2';
 const VOLUME_STORAGE_KEY = 'chicken-life-master-volume';
 const BASE_CAMERA_ZOOM = 1;
 const DAY_BGM_KEY = 'bgm-day';
@@ -114,22 +120,8 @@ function publicAsset(path: string) {
 }
 
 function loadSavedGameState() {
-  try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
-    if (!raw) return createGameState();
-    const parsed = JSON.parse(raw) as { state?: unknown };
-    return restoreGameState(parsed.state ?? parsed);
-  } catch {
-    return createGameState();
-  }
-}
-
-function saveGameState(state: GameState) {
-  try {
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify({ version: 2, savedAt: Date.now(), state }));
-  } catch {
-    // localStorage can be unavailable in restricted browser modes; the game should still run.
-  }
+  const result = loadSaveEnvelope(window.localStorage);
+  return result.kind === 'loaded' ? restoreGameState(result.state) : createGameState();
 }
 
 function loadSavedMasterVolume() {
@@ -180,12 +172,14 @@ export class GameScene extends Phaser.Scene {
   private recentCluckSfx: string[] = [];
 
   private handleGameplayKeyDown = (event: KeyboardEvent) => {
+    if (!this.state.profile.named || isTextEntryTarget(event.target)) return;
     if (!GAMEPLAY_KEY_CODES.has(event.code)) return;
     this.keyboardState.keyDown(event.code, event.repeat);
     event.preventDefault();
   };
 
   private handleGameplayKeyUp = (event: KeyboardEvent) => {
+    if (!this.state.profile.named || isTextEntryTarget(event.target)) return;
     if (!GAMEPLAY_KEY_CODES.has(event.code)) return;
     this.keyboardState.keyUp(event.code);
     event.preventDefault();
@@ -197,6 +191,13 @@ export class GameScene extends Phaser.Scene {
 
   private handleVisibilityChange = () => {
     if (document.hidden) this.resetGameplayKeys();
+  };
+
+  private handleNameConfirmed = (event: Event) => {
+    const name = String((event as CustomEvent<{ name?: unknown }>).detail?.name ?? '');
+    setChickenName(this.state, name);
+    this.resetGameplayKeys();
+    this.emitHud(true, true);
   };
 
   constructor() {
@@ -237,7 +238,12 @@ export class GameScene extends Phaser.Scene {
     }
     if (detail.action === 'forceEgg') debugSetEggType(this.state, detail.eggType);
     if (detail.action === 'clearSave') {
-      window.localStorage.removeItem(SAVE_KEY);
+      try {
+        window.localStorage.removeItem(SAVE_KEY);
+        window.localStorage.removeItem(LEGACY_SAVE_KEY);
+      } catch {
+        // Saving can be unavailable in restricted browser modes; the warning is shown by the HUD.
+      }
       this.state = createGameState();
       this.rebuildWorldFromState();
       this.state.message = '调试：存档已清空，重新开始。';
@@ -273,9 +279,11 @@ export class GameScene extends Phaser.Scene {
     this.setupMusic();
     window.addEventListener('chicken-life:debug', this.handleDebugEvent);
     window.addEventListener('chicken-life:volume', this.handleVolumeEvent);
+    window.addEventListener('chicken-life:name-confirmed', this.handleNameConfirmed);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('chicken-life:debug', this.handleDebugEvent);
       window.removeEventListener('chicken-life:volume', this.handleVolumeEvent);
+      window.removeEventListener('chicken-life:name-confirmed', this.handleNameConfirmed);
       window.removeEventListener('keydown', this.handleMusicUnlock);
       window.removeEventListener('keydown', this.handleGameplayKeyDown, { capture: true });
       window.removeEventListener('keyup', this.handleGameplayKeyUp, { capture: true });
@@ -291,6 +299,10 @@ export class GameScene extends Phaser.Scene {
 
   update(time: number, deltaMs: number) {
     const dt = Math.min(deltaMs / 1000, 0.05);
+    if (!this.state.profile.named) {
+      this.updateSprites(dt);
+      return;
+    }
     const actions = this.readActions();
     this.peckCooldown = Math.max(0, this.peckCooldown - dt);
     this.digCooldown = Math.max(0, this.digCooldown - dt);
@@ -1586,8 +1598,17 @@ export class GameScene extends Phaser.Scene {
   private saveGame(force = false) {
     if (!force && this.time.now - this.lastSavedAt < 2600) return;
     this.lastSavedAt = this.time.now;
-    saveGameState(this.state);
+    this.state.saveAvailable = writeSaveEnvelope(window.localStorage, this.state);
   }
+}
+
+function isTextEntryTarget(target: EventTarget | null) {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
 }
 
 function normalize(x: number, y: number): Vec2 {
