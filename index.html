@@ -7,6 +7,25 @@
   </head>
   <body>
     <div id="app">
+      <section id="namingPanel" class="naming-panel" aria-labelledby="namingTitle" hidden>
+        <form id="namingForm" class="naming-card">
+          <span>第一天</span>
+          <h1 id="namingTitle">给这只鸡起个名字</h1>
+          <p>以后你会用这个名字呼唤它回家。</p>
+          <input
+            id="chickenNameInput"
+            name="chickenName"
+            type="text"
+            maxlength="12"
+            autocomplete="off"
+            placeholder="小鸡"
+          />
+          <button type="submit">就叫这个名字</button>
+        </form>
+      </section>
+      <div id="saveWarning" class="save-warning" role="status" hidden>
+        浏览器未允许保存；关闭页面后本次进度会消失。
+      </div>
       <div id="game"></div>
       <div id="hud" aria-live="polite">
         <section class="time-capsule">

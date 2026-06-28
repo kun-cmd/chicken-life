@@ -40,6 +40,10 @@ appRoot.addEventListener('pointerdown', () => {
 });
 
 const hud = {
+  namingPanel: document.querySelector<HTMLElement>('#namingPanel')!,
+  namingForm: document.querySelector<HTMLFormElement>('#namingForm')!,
+  chickenNameInput: document.querySelector<HTMLInputElement>('#chickenNameInput')!,
+  saveWarning: document.querySelector<HTMLElement>('#saveWarning')!,
   dayLabel: document.querySelector<HTMLSpanElement>('#dayLabel')!,
   phaseLabel: document.querySelector<HTMLElement>('#phaseLabel')!,
   staminaMeter: document.querySelector<HTMLElement>('#staminaMeter')!,
@@ -113,6 +117,11 @@ window.addEventListener('chicken-life:hud', (event) => {
 
 function renderHud(snapshot: HudSnapshot) {
   latestSnapshot = snapshot;
+  hud.namingPanel.hidden = !snapshot.requiresNaming;
+  hud.saveWarning.hidden = snapshot.saveAvailable;
+  if (snapshot.requiresNaming && document.activeElement !== hud.chickenNameInput) {
+    hud.chickenNameInput.focus();
+  }
   hud.dayLabel.textContent = `第 ${snapshot.day} 天`;
   hud.phaseLabel.textContent = snapshot.phaseLabel;
   hud.timeLabel.textContent = snapshot.timeLabel;
@@ -162,6 +171,15 @@ function renderHud(snapshot: HudSnapshot) {
     }, 3600);
   }
 }
+
+hud.namingForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  window.dispatchEvent(
+    new CustomEvent('chicken-life:name-confirmed', {
+      detail: { name: hud.chickenNameInput.value },
+    }),
+  );
+});
 
 hud.summaryClose.addEventListener('click', () => {
   dismissedSummaryDay = latestSnapshot?.daySummary?.day ?? dismissedSummaryDay;
