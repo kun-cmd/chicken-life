@@ -381,6 +381,10 @@ export function setChickenName(state: GameState, input: string) {
 
 export function applyFlowEvent(state: GameState, event: DayFlowEvent) {
   state.flow = reduceDayFlow(state.flow, event);
+  syncLegacyPhaseFromFlow(state);
+}
+
+function syncLegacyPhaseFromFlow(state: GameState) {
   const actor = activeActor(state.flow.phase);
   state.mode = actor === 'none' ? state.mode : actor;
   state.phase =
@@ -1054,6 +1058,60 @@ export function finishChickenRun(state: GameState, caught: boolean) {
     : `鸡钻回笼里，咯咯地叫了起来。收下 ${gainedMaterials} 份窝材。`;
 }
 
+export function finishNightResult(state: GameState) {
+  state.egg = createEgg(state);
+  state.reward = null;
+  state.daySummary = createDaySummary(state, 0);
+  state.message = state.caughtToday
+    ? '今晚受了惊，明早去看看留下了什么蛋。'
+    : '门关好了。院子安静下来，明早再来找蛋。';
+}
+
+export function advanceNightResult(state: GameState) {
+  const nextMorningEgg = state.egg;
+  applyFlowEvent(state, { type: 'next-morning' });
+  state.nightPressure = Math.max(
+    0,
+    state.nightPressure - 10 - affectionMorningCalm(state.affection),
+  );
+  state.nutrition = 0;
+  state.waterBoost = 0;
+  state.caughtToday = false;
+  state.huggedToday = false;
+  state.repairedToday = false;
+  state.keeperRescueUsedToday = false;
+  state.drankToday = false;
+  state.holesDugToday = 0;
+  state.lightPressureUsed = freshLightPressureUsed();
+  state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 32 };
+  state.human = { x: 750, y: 448 };
+  state.chickenWander = { target: null, wait: 0.4, pause: 0.2, facing: 1 };
+  state.keeper = {
+    ...KEEPER_START,
+    active: true,
+    returning: false,
+    doneFeeding: false,
+    rescuing: false,
+    routeIndex: 1,
+    scatterCooldown: 1.6,
+    facing: 1,
+  };
+  state.stats.stamina = state.stats.maxStamina;
+  state.stats.fullness = 0;
+  state.eaten = freshEaten();
+  state.foods = [];
+  state.holes = state.holes.filter((hole) => state.day - hole.dugDay <= 1).slice(-4);
+  state.animals = [];
+  state.animalCooldown = 5.8;
+  state.catVisitedToday = false;
+  state.catWillVisitToday = Math.random() < CAT_VISIT_CHANCE;
+  state.weasel = { x: -120, y: 820, active: false, chasing: false, stunned: 0 };
+  state.egg = nextMorningEgg;
+  state.reward = null;
+  state.message = '清晨到了。先在院子里找到今天的蛋。';
+  spawnDailyFood(state);
+}
+
 export function collectEgg(state: GameState) {
   if (!state.egg || state.egg.found) return;
   state.egg.found = true;
@@ -1227,10 +1285,17 @@ export function restoreGameState(saved: unknown): GameState {
   const fresh = createGameState();
   if (!saved || typeof saved !== 'object') return fresh;
   const input = saved as Partial<GameState>;
+  const hasSavedFlow = !!input.flow && typeof input.flow === 'object';
+  const savedDay = Number(input.day);
+  const restoredFlow = createDayFlow(
+    hasSavedFlow
+      ? input.flow
+      : { day: Number.isFinite(savedDay) && savedDay > 0 ? Math.floor(savedDay) : 1 },
+  );
   const restored: GameState = {
     ...fresh,
     ...input,
-    flow: createDayFlow(input.flow),
+    flow: restoredFlow,
     profile: {
       ...fresh.profile,
       ...(input.profile ?? {}),
@@ -1250,7 +1315,7 @@ export function restoreGameState(saved: unknown): GameState {
     eaten: { ...fresh.eaten, ...(input.eaten ?? {}) },
     foods: Array.isArray(input.foods) ? input.foods.map((food) => restoreFood(food, fresh)) : fresh.foods,
     holes: Array.isArray(input.holes) ? input.holes : fresh.holes,
-    egg: input.egg ?? null,
+    egg: input.egg ?? (hasSavedFlow ? null : createTutorialEgg()),
     eggArchive: Array.isArray(input.eggArchive) ? input.eggArchive : fresh.eggArchive,
     animals: Array.isArray(input.animals) ? input.animals : fresh.animals,
     weasel: { ...fresh.weasel, ...(input.weasel ?? {}) },
@@ -1267,6 +1332,7 @@ export function restoreGameState(saved: unknown): GameState {
   restored.nutrition = Number.isFinite(savedNutrition) ? clamp(savedNutrition, 0, FULLNESS_LIMIT) : restored.stats.fullness;
   const savedWaterBoost = Number((input as { waterBoost?: unknown }).waterBoost ?? 0);
   restored.waterBoost = Number.isFinite(savedWaterBoost) ? clamp(savedWaterBoost, 0, WATER_BOOST_LIMIT) : 0;
+  syncLegacyPhaseFromFlow(restored);
   return restored;
 }
 
@@ -1324,12 +1390,16 @@ export function debugAddMaterials(state: GameState, amount = 30) {
 }
 
 export function debugJumpToDusk(state: GameState) {
-  if (state.mode !== 'chicken') {
+  if (state.flow.phase !== 'chicken-day' && state.flow.phase !== 'chicken-dusk') {
     state.message = '调试：只有母鸡行动时才能跳到黄昏。';
     return false;
   }
-  state.time = Math.max(state.time, DUSK_START);
-  state.phase = state.time >= NIGHT_START ? 'night' : 'dusk';
+  if (state.flow.phase === 'chicken-day') {
+    applyFlowEvent(state, {
+      type: 'tick',
+      amount: Math.max(0, 0.65 - state.flow.clock),
+    });
+  }
   state.message = '调试：天色压下来，已经跳到黄昏。';
   return true;
 }

@@ -24,7 +24,8 @@ import {
   writeSaveEnvelope,
 } from '../../game/persistence/saveGame';
 import {
-  advanceChickenTime,
+  advanceNightResult,
+  applyFlowEvent,
   buildHudSnapshot,
   callKeeperForWeasel,
   cluckAt,
@@ -37,7 +38,7 @@ import {
   digHole,
   drinkAtPond,
   expireFoods,
-  finishChickenRun,
+  finishNightResult,
   hugChicken,
   improveCoopAbility,
   isFoodLockedByAnimal,
@@ -52,7 +53,6 @@ import {
   setChickenName,
   overstuffRatioFor,
   spendStamina,
-  startNextDay,
   updateAnimals,
   updateKeeper,
   updateKeeperRescue,
@@ -154,7 +154,7 @@ export class GameScene extends Phaser.Scene {
   private animalViews = new Map<number, AnimalView>();
   private eggView: Phaser.GameObjects.Container | null = null;
   private lastHudAt = 0;
-  private nextDayTimer = 0;
+  private nightResultTimer = 0;
   private peckCooldown = 0;
   private digCooldown = 0;
   private drinkSfxCooldown = 0;
@@ -304,6 +304,17 @@ export class GameScene extends Phaser.Scene {
       this.updateSprites(dt);
       return;
     }
+
+    if (this.state.flow.phase === 'night-result') {
+      this.nightResultTimer = Math.max(0, this.nightResultTimer - dt);
+      if (this.nightResultTimer === 0) {
+        advanceNightResult(this.state);
+        this.switchToHuman();
+      }
+      this.updateSprites(dt);
+      return;
+    }
+
     const actions = this.readActions();
     this.peckCooldown = Math.max(0, this.peckCooldown - dt);
     this.digCooldown = Math.max(0, this.digCooldown - dt);
@@ -311,10 +322,11 @@ export class GameScene extends Phaser.Scene {
     this.caughtCooldown = Math.max(0, this.caughtCooldown - dt);
     this.chickenLiftTimer = Math.max(0, this.chickenLiftTimer - dt);
 
-    if (this.state.mode === 'chicken') {
-      this.updateChicken(dt, actions);
-    } else {
+    const storyPhase = this.state.flow.phase;
+    if (storyPhase === 'morning-human' || storyPhase === 'dusk-human') {
       this.updateHuman(dt, actions);
+    } else if (storyPhase === 'chicken-day' || storyPhase === 'chicken-dusk') {
+      this.updateChicken(dt, actions);
     }
 
     this.updateSprites(dt);
@@ -388,31 +400,16 @@ export class GameScene extends Phaser.Scene {
       recoverStamina(this.state, (hasMove ? 18 : 34) * dt);
     }
 
-    if (this.handleCoopEntry(actions)) return;
     actionSeconds += this.handleChickenActions(dt, actions);
     this.advanceChickenWorld(actionSeconds);
     if (this.updateRealtimeThreats(dt)) return;
-    if (this.handleCoopEntry(actions)) return;
 
-    if (this.state.time >= 0.995 && this.caughtCooldown <= 0) {
-      finishChickenRun(this.state, true);
+    if (actions.call && this.state.flow.phase === 'chicken-dusk') {
+      applyFlowEvent(this.state, { type: 'call-human' });
+      this.state.message = `${this.state.profile.name}叫了几声，养鸡人从屋里出来了。`;
       this.switchToHuman();
+      return;
     }
-  }
-
-  private handleCoopEntry(actions: InputActions) {
-    if ((this.state.phase !== 'dusk' && this.state.phase !== 'night') || !this.isAtCoopDoor()) return false;
-
-    if (actions.search) {
-      finishChickenRun(this.state, false);
-      this.switchToHuman();
-      return true;
-    }
-
-    if (!this.state.message) {
-      this.state.message = '天黑了，鸡窝门就在旁边。按空格键进屋。';
-    }
-    return false;
   }
 
   private handleChickenActions(dt: number, actions: InputActions) {
@@ -498,7 +495,7 @@ export class GameScene extends Phaser.Scene {
 
   private advanceChickenWorld(actionSeconds: number) {
     if (actionSeconds <= 0) return;
-    advanceChickenTime(this.state, actionSeconds);
+    applyFlowEvent(this.state, { type: 'tick', amount: actionSeconds / 155 });
     updateWaterBoost(this.state, actionSeconds);
     const actorSeconds = Math.min(actionSeconds, 0.08);
     const newSeed = updateKeeper(this.state, actorSeconds, actionSeconds);
@@ -590,7 +587,14 @@ export class GameScene extends Phaser.Scene {
 
     if (dist < 34 && this.caughtCooldown <= 0) {
       this.caughtCooldown = 2;
-      finishChickenRun(this.state, true);
+      this.state.caughtToday = true;
+      if (this.state.flow.phase === 'chicken-day') {
+        applyFlowEvent(this.state, { type: 'tick', amount: 1 });
+      }
+      if (this.state.flow.phase === 'chicken-dusk') {
+        applyFlowEvent(this.state, { type: 'call-human' });
+      }
+      this.state.message = '黄鼠狼扑了过来，养鸡人听见惊叫赶出了屋。';
       this.switchToHuman();
       return true;
     }
@@ -610,9 +614,38 @@ export class GameScene extends Phaser.Scene {
       this.human.scaleX = direction.x < -0.05 ? -1 : direction.x > 0.05 ? 1 : this.human.scaleX;
     }
 
+    const nearCoop = distance(this.state.human, COOP_DOOR) < 94;
+    if (this.state.flow.phase === 'dusk-human') {
+      this.updateDuskCollection(dt, actions, nearCoop);
+      return;
+    }
+
     updateMorningChickenWander(this.state, dt);
 
-    const nearCoop = distance(this.state.human, COOP_DOOR) < 94;
+    if (this.state.flow.morningEggFound && actions.search && nearCoop) {
+      applyFlowEvent(this.state, { type: 'release-chicken' });
+      this.state.message = '鸡窝门打开了，今天的院子生活开始。';
+      this.switchToChicken();
+      return;
+    }
+
+    let searchedForEgg = false;
+    if (this.state.egg && !this.state.egg.found) {
+      const eggDistance = distance(this.state.human, this.state.egg);
+      if (eggDistance < 132) this.showEggClue();
+      if (actions.search) {
+        searchedForEgg = true;
+        if (eggDistance < 76) {
+          collectEgg(this.state);
+          applyFlowEvent(this.state, { type: 'egg-found' });
+          this.playSfx(SFX_REWARD_KEY, 0.64);
+          this.revealEgg();
+          this.state.message = '蛋找到了。还可以陪陪鸡，准备好后去鸡窝门口放它出院。';
+        } else {
+          this.state.message = '这里没有蛋，鸡刚才不是朝这个方向叫。';
+        }
+      }
+    }
 
     if (actions.interact) {
       if (distance(this.state.human, this.state.chicken) < 74) {
@@ -632,7 +665,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    const usedCoopTraining = actions.search && nearCoop;
+    const usedCoopTraining = !searchedForEgg && actions.search && nearCoop;
     if (usedCoopTraining) {
       if (improveCoopAbility(this.state)) {
         this.playSfx(SFX_UPGRADE_KEY, 0.62);
@@ -640,26 +673,39 @@ export class GameScene extends Phaser.Scene {
         this.playCloseMoment();
       }
     }
+  }
 
-    if (!usedCoopTraining && this.state.egg && !this.state.egg.found) {
-      const eggDistance = distance(this.state.human, this.state.egg);
-      if (eggDistance < 132) this.showEggClue();
-      if (actions.search && eggDistance < 76) {
-        collectEgg(this.state);
-        this.playSfx(SFX_REWARD_KEY, 0.64);
-        this.revealEgg();
-        this.nextDayTimer = 3.2;
-      } else if (actions.search && eggDistance >= 76) {
-        this.state.message = '这里没有蛋，鸡刚才不是朝这个方向叫。';
+  private updateDuskCollection(dt: number, actions: InputActions, humanNearCoop: boolean) {
+    const chickenDistance = distance(this.state.human, this.state.chicken);
+    if (chickenDistance < 150 && chickenDistance > 42) {
+      const follow = normalize(
+        this.state.human.x - this.state.chicken.x,
+        this.state.human.y - this.state.chicken.y,
+      );
+      const target = {
+        x: this.state.chicken.x + follow.x * 70 * dt,
+        y: this.state.chicken.y + follow.y * 70 * dt,
+      };
+      if (!isBlocked(target, 18)) {
+        this.state.chicken = target;
       }
     }
 
-    if (this.nextDayTimer > 0) {
-      this.nextDayTimer -= dt;
-      if (this.nextDayTimer <= 0) {
-        startNextDay(this.state);
-        this.switchToChicken();
-      }
+    const chickenNearCoop = distance(this.state.chicken, COOP_DOOR) < 72;
+    if (actions.interact && humanNearCoop && chickenNearCoop) {
+      this.state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 24 };
+      applyFlowEvent(this.state, { type: 'chicken-entered-coop' });
+      applyFlowEvent(this.state, { type: 'close-door' });
+      finishNightResult(this.state);
+      this.nightResultTimer = 2.4;
+      this.emitHud(true, true);
+      return;
+    }
+
+    if (actions.interact) {
+      this.state.message = chickenNearCoop
+        ? '你也要走到鸡窝门边，才能把门关好。'
+        : `先靠近${this.state.profile.name}，慢慢带它走到鸡窝门口。`;
     }
   }
 
