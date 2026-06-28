@@ -6,4 +6,5 @@ export interface InputActions {
   digOrRest: boolean;
   interact: boolean;
   search: boolean;
+  call: boolean;
 }

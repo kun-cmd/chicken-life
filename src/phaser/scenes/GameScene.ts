@@ -103,6 +103,7 @@ const GAMEPLAY_KEY_CODES = new Set([
   'ShiftRight',
   'Space',
   'KeyE',
+  'KeyQ',
   'Enter',
 ]);
 const SFX_CLUCK_KEYS = [
@@ -357,6 +358,7 @@ export class GameScene extends Phaser.Scene {
       digOrRest: this.keyboardState.isDown('KeyE'),
       interact: interactPressed,
       search: spacePressed || enterPressed,
+      call: this.keyboardState.consumePress('KeyQ'),
     };
   }
 
