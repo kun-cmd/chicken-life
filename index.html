@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>小院鸡生</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="game"></div>
+      <div id="hud" aria-live="polite">
+        <section class="time-capsule">
+          <div class="day-chip">
+            <span id="dayLabel">第 1 天</span>
+            <strong id="phaseLabel">白天</strong>
+          </div>
+          <div class="clock">
+            <span id="timeLabel">上午</span>
+            <i id="clockNeedle"></i>
+          </div>
+        </section>
+
+        <section class="hud-dock">
+          <div class="status-pair">
+            <div class="meter meter--primary meter--fullness">
+              <span>饱食</span>
+              <div class="meter-track"><i id="fullnessMeter"></i></div>
+              <b id="fullnessLabel">0</b>
+            </div>
+            <div class="meter meter--primary meter--nutrition">
+              <span>营养</span>
+              <div class="meter-track"><i id="nutritionMeter"></i></div>
+              <b id="nutritionLabel">0</b>
+            </div>
+          </div>
+          <div class="status-minis">
+            <div class="meter meter--mini meter--stamina">
+              <span>冲刺</span>
+              <b id="staminaLabel">100</b>
+              <div class="meter-track"><i id="staminaMeter"></i></div>
+            </div>
+            <div class="meter meter--mini meter--night">
+              <span>夜压</span>
+              <b id="pressureLabel">0</b>
+              <div class="meter-track"><i id="pressureMeter"></i></div>
+            </div>
+            <div class="meter meter--mini meter--water">
+              <span>润喉</span>
+              <b id="waterBoostLabel">0</b>
+              <div class="meter-track"><i id="waterBoostMeter"></i></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="today-plate" aria-label="今天吃到">
+          <div class="today-plate__head">
+            <span>今日餐盘</span>
+            <b>详情</b>
+          </div>
+          <div id="todayPlateList" class="today-plate__list"></div>
+        </section>
+
+        <div id="goalTip" class="goal-tip">米粒吃够 4 个可以尝试解锁嫩草。</div>
+
+        <div id="toast" class="toast">小院醒了。</div>
+        <div id="rewardPanel" class="reward-panel" hidden>
+          <span id="rewardTitle">找到鸡蛋</span>
+          <strong id="rewardName">饱饱蛋</strong>
+          <p id="rewardEffect">冲刺上限提升。</p>
+        </div>
+        <section id="daySummaryPanel" class="summary-panel" hidden>
+          <div class="panel-head">
+            <span>每日结算</span>
+            <button id="summaryClose" type="button">×</button>
+          </div>
+          <strong id="summaryEggName">饱饱蛋</strong>
+          <div id="summaryStats" class="summary-grid"></div>
+          <p id="summaryReason"></p>
+          <p id="summaryNearMiss"></p>
+        </section>
+        <section id="inventoryPanel" class="inventory-panel" hidden>
+          <div class="panel-head">
+            <span>今日总览</span>
+            <button id="inventoryClose" type="button">×</button>
+          </div>
+          <div class="panel-block">
+            <h2>今天吃到</h2>
+            <div id="inventoryFoodList" class="food-detail-grid"></div>
+          </div>
+          <div class="panel-block">
+            <h2>资源与训练</h2>
+            <div id="inventoryMaterialList" class="stat-grid"></div>
+          </div>
+          <div class="panel-block">
+            <h2>蛋图鉴</h2>
+            <div id="inventoryEggList" class="panel-list"></div>
+          </div>
+          <div class="panel-block">
+            <h2>当前增益</h2>
+            <div id="inventoryUpgradeList" class="panel-list"></div>
+          </div>
+        </section>
+        <section id="debugPanel" class="debug-panel" hidden>
+          <div class="panel-head">
+            <span>调试和平衡</span>
+            <button id="debugClose" type="button">×</button>
+          </div>
+          <div class="debug-actions">
+            <button type="button" data-debug="addAffection">+亲密</button>
+            <button type="button" data-debug="addMaterials">+窝材</button>
+            <button type="button" data-debug="jumpDusk">跳黄昏</button>
+            <button type="button" data-debug="spawnWeasel">生成黄鼠狼</button>
+            <button type="button" data-debug="clearSave">清空存档</button>
+          </div>
+          <label class="debug-egg">
+            <span>指定产蛋</span>
+            <select id="debugEggType">
+              <option value="greenLeaf">青叶蛋</option>
+              <option value="swift">疾走蛋</option>
+              <option value="lantern">守夜蛋</option>
+              <option value="brave">铁胆蛋</option>
+              <option value="sunny">暖瓜子蛋</option>
+              <option value="fullBelly">饱饱蛋</option>
+              <option value="balanced">均衡蛋</option>
+              <option value="cracked">裂纹蛋</option>
+            </select>
+            <button type="button" id="forceEggButton">指定</button>
+          </label>
+          <label class="debug-volume">
+            <span>总音量</span>
+            <input id="masterVolume" type="range" min="0" max="100" step="1" value="70" />
+            <b id="masterVolumeLabel">70%</b>
+          </label>
+          <p>F1 开关调试，F2 +亲密，F3 +窝材，F4 跳黄昏，F5 生成黄鼠狼。</p>
+        </section>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

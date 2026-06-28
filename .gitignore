@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-itch/
+.npm-cache/
+.test-dist/
+coverage/
+*.zip
+dev-server*.log
+vite-dev*.log
