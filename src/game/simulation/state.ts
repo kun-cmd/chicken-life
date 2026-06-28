@@ -20,6 +20,14 @@ import {
   normalizeChickenName,
   type ChickenProfile,
 } from '../profile/chickenProfile';
+import {
+  activeActor,
+  createDayFlow,
+  reduceDayFlow,
+  type DayFlowEvent,
+  type DayFlowState,
+  type StoryPhase,
+} from '../systems/dayFlow';
 
 export type Phase = 'day' | 'dusk' | 'night' | 'human';
 export type PlayerMode = 'chicken' | 'human';
@@ -147,6 +155,7 @@ export interface ChickenWanderState {
 export interface GameState {
   profile: ChickenProfile;
   saveAvailable: boolean;
+  flow: DayFlowState;
   day: number;
   phase: Phase;
   mode: PlayerMode;
@@ -203,6 +212,7 @@ export interface HudSnapshot {
   chickenName: string;
   requiresNaming: boolean;
   saveAvailable: boolean;
+  storyPhase: StoryPhase;
   day: number;
   phase: Phase;
   mode: PlayerMode;
@@ -265,14 +275,26 @@ const WORM_VISIBLE_RANDOM = 0.06;
 const RESTOCK_DISTANCE_FROM_CHICKEN = 420;
 const RESTOCK_FOOD_COUNT = 3;
 
+function createTutorialEgg(): EggEntity {
+  return {
+    x: 1005,
+    y: 430,
+    type: 'balanced',
+    name: '第一枚蛋',
+    effect: '找到蛋后，才放心把鸡放进院子。',
+    found: false,
+  };
+}
+
 export function createGameState(): GameState {
   const state: GameState = {
     profile: createChickenProfile(),
     saveAvailable: true,
+    flow: createDayFlow(),
     day: 1,
-    phase: 'day',
-    mode: 'chicken',
-    time: 0.06,
+    phase: 'human',
+    mode: 'human',
+    time: 0.08,
     nightPressure: 0,
     nutrition: 0,
     waterBoost: 0,
@@ -326,7 +348,7 @@ export function createGameState(): GameState {
     eaten: freshEaten(),
     foods: [],
     holes: [],
-    egg: null,
+    egg: createTutorialEgg(),
     eggArchive: [],
     animals: [],
     animalCooldown: 5.8,
@@ -355,6 +377,22 @@ export function setChickenName(state: GameState, input: string) {
   state.profile.name = normalizeChickenName(input);
   state.profile.named = true;
   state.message = `从今天起，它叫${state.profile.name}。`;
+}
+
+export function applyFlowEvent(state: GameState, event: DayFlowEvent) {
+  state.flow = reduceDayFlow(state.flow, event);
+  const actor = activeActor(state.flow.phase);
+  state.mode = actor === 'none' ? state.mode : actor;
+  state.phase =
+    state.flow.phase === 'morning-human' || state.flow.phase === 'dusk-human'
+      ? 'human'
+      : state.flow.phase === 'chicken-dusk'
+        ? 'dusk'
+        : state.flow.phase === 'night-result'
+          ? 'night'
+          : 'day';
+  state.day = state.flow.day;
+  state.time = state.flow.clock;
 }
 
 export function advanceChickenTime(state: GameState, dt: number) {
@@ -995,9 +1033,12 @@ function oldRepairCoop(state: GameState) {
 
 export function finishChickenRun(state: GameState, caught: boolean) {
   state.caughtToday = caught;
-  state.mode = 'human';
-  state.phase = 'human';
-  state.time = Math.max(state.time, 0.86);
+  if (state.flow.phase === 'chicken-day') {
+    applyFlowEvent(state, { type: 'tick', amount: 1 });
+  }
+  if (state.flow.phase === 'chicken-dusk') {
+    applyFlowEvent(state, { type: 'call-human' });
+  }
   state.nightPressure = caught ? 88 : Math.min(state.nightPressure, 50);
   state.egg = createEgg(state);
   state.human = { x: 750, y: 448 };
@@ -1028,10 +1069,7 @@ export function collectEgg(state: GameState) {
 
 export function startNextDay(state: GameState) {
   const carriedPressure = Math.max(0, state.nightPressure - 10 - affectionMorningCalm(state.affection));
-  state.day += 1;
-  state.phase = 'day';
-  state.mode = 'chicken';
-  state.time = 0.06;
+  applyFlowEvent(state, { type: 'next-morning' });
   state.nightPressure = carriedPressure;
   state.nutrition = 0;
   state.waterBoost = 0;
@@ -1081,10 +1119,11 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     chickenName: state.profile.name,
     requiresNaming: !state.profile.named,
     saveAvailable: state.saveAvailable,
+    storyPhase: state.flow.phase,
     day: state.day,
     phase: state.phase,
     mode: state.mode,
-    phaseLabel: phaseLabel(state.phase),
+    phaseLabel: storyPhaseLabel(state.flow.phase),
     timeLabel: timeLabel(state.time, state.phase),
     clockDeg: state.time * 270 - 60,
     stamina: Math.round(state.stats.stamina),
@@ -1191,6 +1230,7 @@ export function restoreGameState(saved: unknown): GameState {
   const restored: GameState = {
     ...fresh,
     ...input,
+    flow: createDayFlow(input.flow),
     profile: {
       ...fresh.profile,
       ...(input.profile ?? {}),
@@ -1969,11 +2009,13 @@ const eggCatalog: Record<EggType, { name: string; effect: string; upgrade: strin
   },
 };
 
-function phaseLabel(phase: Phase) {
-  if (phase === 'day') return '白天';
-  if (phase === 'dusk') return '黄昏';
-  if (phase === 'night') return '夜晚';
-  return '找蛋';
+function storyPhaseLabel(phase: StoryPhase) {
+  if (phase === 'morning-human') return '清晨找蛋';
+  if (phase === 'chicken-day') return '白天';
+  if (phase === 'chicken-dusk') return '黄昏';
+  if (phase === 'dusk-human') return '黄昏收鸡';
+  if (phase === 'night-result') return '夜里';
+  return '归巢之夜';
 }
 
 function timeLabel(time: number, phase: Phase) {
