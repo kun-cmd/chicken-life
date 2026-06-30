@@ -543,10 +543,9 @@ export function advanceChickenTime(state: GameState, dt: number) {
 }
 
 export function updateNightPressure(state: GameState, context: PressureContext) {
-  if (state.mode !== 'chicken') return;
-  if (state.phase === 'day') return;
-  if (context.nearCoop) return;
-  const darkness = state.phase === 'night' ? 1 : state.phase === 'dusk' ? 0.48 : 0;
+  if (state.flow.phase !== 'chicken-dusk' && state.flow.phase !== 'dusk-human') return;
+  const darkness =
+    state.phase === 'night' ? 1 : state.flow.phase === 'chicken-dusk' || state.flow.phase === 'dusk-human' ? 0.48 : 0;
   const distanceToCoop = Math.min(distance(context.position, COOP_DOOR) / 780, 1);
   const lowSprintRisk = context.staminaRatio < 0.2 ? (0.2 - context.staminaRatio) * 10 : 0;
   const stuffedRisk = overstuffRatioFor(state) * 5.5;
@@ -554,6 +553,7 @@ export function updateNightPressure(state: GameState, context: PressureContext) 
 
   if (context.inShadow) gain += 3 * darkness;
   if (!context.onPath) gain += 2.2 * darkness;
+  if (context.nearLight && state.flow.phase === 'dusk-human') gain *= 0.5;
   const courageReduction = state.stats.courage * 0.9;
   let nextPressure = clamp(state.nightPressure + (gain - courageReduction) * context.dt, 0, 100);
 
@@ -998,13 +998,6 @@ function keeperRescueSpeedFor(state: GameState) {
   return state.affection >= KEEPER_SWIFT_RESCUE_AFFECTION ? 270 : 205 + state.affection * 0.7;
 }
 
-function affectionMorningCalm(affection: number) {
-  if (affection >= 80) return 16;
-  if (affection >= 50) return 9;
-  if (affection >= 30) return 4;
-  return 0;
-}
-
 export function hugChicken(state: GameState) {
   if (state.mode !== 'human') return false;
   if (state.huggedToday) {
@@ -1171,6 +1164,8 @@ export function finishChickenRun(state: GameState, caught: boolean) {
 }
 
 export function finishNightResult(state: GameState) {
+  recordTrustMemory(state.relationship, state.day, 'safe-close');
+  state.carryingChicken = false;
   state.egg = createEgg(state);
   state.reward = null;
   const gainedMaterials = materialGainForToday(state);
@@ -1184,10 +1179,7 @@ export function finishNightResult(state: GameState) {
 export function advanceNightResult(state: GameState) {
   const nextMorningEgg = state.egg;
   applyFlowEvent(state, { type: 'next-morning' });
-  state.nightPressure = Math.max(
-    0,
-    state.nightPressure - 10 - affectionMorningCalm(state.affection),
-  );
+  state.nightPressure = 0;
   state.nutrition = 0;
   state.waterBoost = 0;
   state.caughtToday = false;
@@ -1215,6 +1207,7 @@ export function advanceNightResult(state: GameState) {
   state.stats.stamina = state.stats.maxStamina;
   state.foraging.sprintEnergy = state.foraging.maxSprintEnergy;
   state.foraging.foodsEatenToday = [];
+  state.foraging.refillWave = 0;
   state.body.fluttering = false;
   state.activeAbilityTutorial = null;
   state.stats.fullness = 0;
@@ -1242,13 +1235,12 @@ export function collectEgg(state: GameState) {
     name: state.egg.name,
     effect: state.egg.effect,
   };
-  state.message = `${state.egg.name} 被捧起来了。`;
+  state.message = `${state.egg.name} 被捧起来了。可以再照料鸡；准备好后回房门口按 E 回屋。`;
 }
 
 export function startNextDay(state: GameState) {
-  const carriedPressure = Math.max(0, state.nightPressure - 10 - affectionMorningCalm(state.affection));
   applyFlowEvent(state, { type: 'next-morning' });
-  state.nightPressure = carriedPressure;
+  state.nightPressure = 0;
   state.nutrition = 0;
   state.waterBoost = 0;
   state.caughtToday = false;
@@ -1276,6 +1268,7 @@ export function startNextDay(state: GameState) {
   state.stats.stamina = state.stats.maxStamina;
   state.foraging.sprintEnergy = state.foraging.maxSprintEnergy;
   state.foraging.foodsEatenToday = [];
+  state.foraging.refillWave = 0;
   state.body.fluttering = false;
   state.activeAbilityTutorial = null;
   state.stats.fullness = 0;
@@ -1291,10 +1284,6 @@ export function startNextDay(state: GameState) {
   state.weasel = { x: -120, y: 820, active: false, chasing: false, stunned: 0 };
   state.reward = null;
   state.message = '新的一天，小院泥地又冒出细小食物。';
-  state.message =
-    carriedPressure > 0
-      ? `新的一天，小院醒了，但昨晚还剩 ${Math.round(carriedPressure)} 点夜压。`
-      : '新的一天，小院泥地又冒出细小食物。';
   spawnDailyFood(state);
 }
 
@@ -1359,16 +1348,16 @@ function goalTipFor(state: GameState) {
   const tutorial = tutorialForAbility(state.activeAbilityTutorial);
   if (state.mode === 'human') {
     if (state.flow.phase === 'dusk-human') {
-      return `靠近${state.profile.name}，带它回鸡窝；你和鸡都到门口后按 E 关门。`;
+      return `提灯陪${state.profile.name}走到鸡舍；门边按 E 开门、撒料，鸡进去后再关门。`;
     }
-    if (state.egg && !state.egg.found) return '在院子里寻找今天的蛋，靠近后按空格搜索。';
-    if (state.flow.morningEggFound) return '还可以靠近鸡按 E 抱一抱；准备好后去窝门口按空格放鸡出院。';
+    if (state.egg && !state.egg.found) return '按空格搜索；没找到时，看鸡朝哪个方向叫。';
+    if (state.flow.morningEggFound) return '还可以靠近鸡按 E 抱一抱，或去鸡窝修缮；准备好后到房门口按 E 回屋。';
     return '靠近鸡按 E 互动。';
   }
   if (tutorial) return tutorial.prompt;
-  if (state.flow.phase === 'chicken-dusk') return `按 Q 呼唤养鸡人来接${state.profile.name}回窝。`;
+  if (state.flow.phase === 'chicken-dusk') return `连续咯咯叫几声，让屋里听见${state.profile.name}想回窝。`;
   if (state.weasel.active) return '黄鼠狼来了：咯咯叫、冲刺躲开，等养鸡人赶来。';
-  const controls = ['空格啄食', 'Q 咯咯叫'];
+  const controls = ['空格啄食 / 咯咯叫'];
   if (state.profile.awakenedAbilities.scratch) controls.push('E 刨松土');
   if (state.profile.awakenedAbilities.sprint) controls.push('Shift 冲刺');
   if (state.profile.awakenedAbilities.flutter) controls.push('F 扑翅');
@@ -1592,13 +1581,30 @@ export function visibleFoods(state: GameState) {
   return state.foods.filter((food) => state.time >= food.visibleAt);
 }
 
+export function refillForagingFoods(state: GameState, offscreenMudPoints: readonly Vec2[]) {
+  if (state.mode !== 'chicken' || offscreenMudPoints.length === 0) return [];
+  const remaining = visibleFoods(state).filter((food) => isForagingFood(food.type)).length;
+  if (remaining > 2) return [];
+
+  const wave = state.foraging.refillWave;
+  const plan = createDailyFoodPlan(
+    state.profile.runSeed ^ Math.imul(wave + 1, 0x45d9f3b),
+    state.day,
+    foodPoolFor(state.profile, state.flow.phase === 'chicken-dusk'),
+    offscreenMudPoints,
+    4,
+  );
+  state.foraging.refillWave += 1;
+  return plan.map((food) => spawnFood(state, food.type, food, state.time));
+}
+
 function spawnDailyFood(state: GameState) {
   const plan = createDailyFoodPlan(
     state.profile.runSeed,
     state.day,
     foodPoolFor(state.profile, false),
     FOOD_SPAWN_POINTS,
-    10,
+    15,
   );
   for (const food of plan) spawnFood(state, food.type, food, 0);
 
@@ -1692,14 +1698,10 @@ function pickSparrowTarget(state: GameState) {
 }
 
 function scatterSunflowerSeed(state: GameState) {
-  const spread = {
-    x: state.keeper.x - state.keeper.facing * (24 + Math.random() * 18) + PhaserLikeRandom(-10, 10),
-    y: state.keeper.y + PhaserLikeRandom(16, 34),
-  };
   const seed: FoodEntity = {
     id: state.nextId++,
-    x: clamp(spread.x, 58, WORLD_WIDTH - 58),
-    y: clamp(spread.y, 58, WORLD_HEIGHT - 58),
+    x: clamp(state.keeper.x, 58, WORLD_WIDTH - 58),
+    y: clamp(state.keeper.y, 58, WORLD_HEIGHT - 58),
     type: 'sunflower',
     visibleAt: state.time,
     progress: 0,

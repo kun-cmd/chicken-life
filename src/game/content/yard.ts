@@ -20,18 +20,27 @@ export const SAFE_LIGHTS: Vec2[] = [
 export const KEEPER_START: Vec2 = { x: 750, y: 386 };
 
 export const FOOD_SPAWN_POINTS: Vec2[] = [
+  { x: 74, y: 360 },
+  { x: 82, y: 660 },
   { x: 172, y: 362 },
+  { x: 292, y: 268 },
   { x: 305, y: 602 },
+  { x: 330, y: 440 },
   { x: 438, y: 548 },
+  { x: 462, y: 916 },
   { x: 535, y: 815 },
   { x: 610, y: 565 },
-  { x: 742, y: 482 },
-  { x: 845, y: 610 },
   { x: 908, y: 875 },
+  { x: 930, y: 560 },
   { x: 1010, y: 690 },
+  { x: 1188, y: 205 },
+  { x: 1180, y: 892 },
   { x: 1225, y: 430 },
   { x: 1290, y: 670 },
+  { x: 1320, y: 304 },
   { x: 1360, y: 860 },
+  { x: 1426, y: 520 },
+  { x: 1424, y: 740 },
 ];
 
 export const FLUTTER_TARGETS: Vec2[] = [

@@ -11,7 +11,7 @@ import {
 test('dusk call preserves chicken position for human collection', () => {
   const state = createGameState();
   applyFlowEvent(state, { type: 'egg-found' });
-  applyFlowEvent(state, { type: 'release-chicken' });
+  applyFlowEvent(state, { type: 'return-home' });
   applyFlowEvent(state, { type: 'tick', amount: 0.7 });
   state.chicken = { x: 300, y: 600 };
   applyFlowEvent(state, { type: 'call-human' });
@@ -22,7 +22,7 @@ test('dusk call preserves chicken position for human collection', () => {
 test('night result creates tomorrow egg before returning to morning human control', () => {
   const state = createGameState();
   applyFlowEvent(state, { type: 'egg-found' });
-  applyFlowEvent(state, { type: 'release-chicken' });
+  applyFlowEvent(state, { type: 'return-home' });
   applyFlowEvent(state, { type: 'tick', amount: 0.7 });
   applyFlowEvent(state, { type: 'call-human' });
   applyFlowEvent(state, { type: 'chicken-entered-coop' });
@@ -43,7 +43,7 @@ test('night result creates tomorrow egg before returning to morning human contro
 test('debug dusk jump advances the authoritative flow', () => {
   const state = createGameState();
   applyFlowEvent(state, { type: 'egg-found' });
-  applyFlowEvent(state, { type: 'release-chicken' });
+  applyFlowEvent(state, { type: 'return-home' });
   assert.equal(debugJumpToDusk(state), true);
   assert.equal(state.flow.phase, 'chicken-dusk');
 });

@@ -12,7 +12,7 @@ test('game state derives actor and labels from day flow', () => {
   assert.equal(state.flow.phase, 'morning-human');
   assert.equal(state.mode, 'human');
   applyFlowEvent(state, { type: 'egg-found' });
-  applyFlowEvent(state, { type: 'release-chicken' });
+  applyFlowEvent(state, { type: 'return-home' });
   assert.equal(state.mode, 'chicken');
   assert.equal(buildHudSnapshot(state, false).phaseLabel, '白天');
 });

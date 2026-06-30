@@ -7,5 +7,4 @@ export interface InputActions {
   flutterPressed: boolean;
   interactPressed: boolean;
   searchPressed: boolean;
-  callPressed: boolean;
 }

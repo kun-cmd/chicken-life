@@ -13,18 +13,18 @@ function transition(state: DayFlowState, type: InstantEvent['type']) {
   return reduceDayFlow(state, { type } as InstantEvent);
 }
 
-test('requires the morning egg before releasing the chicken', () => {
+test('requires the morning egg before returning home to start chicken day', () => {
   const state = createDayFlow();
-  assert.throws(() => transition(state, 'release-chicken'), /morning egg/i);
+  assert.throws(() => transition(state, 'return-home'), /morning egg/i);
   const found = transition(state, 'egg-found');
-  const released = transition(found, 'release-chicken');
-  assert.equal(released.phase, 'chicken-day');
-  assert.equal(released.chickenInCoop, false);
+  const returned = transition(found, 'return-home');
+  assert.equal(returned.phase, 'chicken-day');
+  assert.equal(returned.chickenInCoop, false);
 });
 
 test('moves from chicken day into dusk and hands control to the human', () => {
   let state = transition(createDayFlow(), 'egg-found');
-  state = transition(state, 'release-chicken');
+  state = transition(state, 'return-home');
   state = reduceDayFlow(state, { type: 'tick', amount: 0.7 });
   assert.equal(state.phase, 'chicken-dusk');
   state = transition(state, 'call-human');
@@ -58,7 +58,7 @@ test('starts the next morning with a closed coop and a new egg requirement', () 
     phase: 'morning-human',
     clock: 0.08,
     morningEggFound: false,
-    chickenInCoop: true,
-    coopDoorClosed: true,
+    chickenInCoop: false,
+    coopDoorClosed: false,
   });
 });

@@ -17,7 +17,7 @@ export interface DayFlowState {
 
 export type DayFlowEvent =
   | { type: 'egg-found' }
-  | { type: 'release-chicken' }
+  | { type: 'return-home' }
   | { type: 'tick'; amount: number }
   | { type: 'call-human' }
   | { type: 'chicken-entered-coop' }
@@ -32,8 +32,8 @@ export function createDayFlow(overrides: Partial<DayFlowState> = {}): DayFlowSta
     phase: 'morning-human',
     clock: 0.08,
     morningEggFound: false,
-    chickenInCoop: true,
-    coopDoorClosed: true,
+    chickenInCoop: false,
+    coopDoorClosed: false,
     ...overrides,
   };
 }
@@ -50,8 +50,8 @@ export function reduceDayFlow(state: DayFlowState, event: DayFlowEvent): DayFlow
     return { ...state, morningEggFound: true };
   }
 
-  if (event.type === 'release-chicken') {
-    if (state.phase !== 'morning-human') throw new Error('Chicken release requires morning');
+  if (event.type === 'return-home') {
+    if (state.phase !== 'morning-human') throw new Error('Returning home requires morning');
     if (!state.morningEggFound) throw new Error('Morning egg must be found first');
     return {
       ...state,

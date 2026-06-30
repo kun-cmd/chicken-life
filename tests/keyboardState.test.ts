@@ -26,10 +26,3 @@ test('reset releases held keys and pending presses', () => {
   assert.equal(keyboard.isDown('ShiftLeft'), false);
   assert.equal(keyboard.consumePress('Space'), false);
 });
-
-test('exposes a call press once', () => {
-  const keyboard = new KeyboardState();
-  keyboard.keyDown('KeyQ', false);
-  assert.equal(keyboard.consumePress('KeyQ'), true);
-  assert.equal(keyboard.consumePress('KeyQ'), false);
-});

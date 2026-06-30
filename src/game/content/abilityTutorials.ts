@@ -18,7 +18,7 @@ export const ABILITY_TUTORIALS: AbilityTutorial[] = [
   {
     ability: 'sprint',
     day: 5,
-    position: { x: 845, y: 610 },
+    position: { x: 930, y: 560 },
     prompt: '虫子突然跑了！朝它移动并按住 Shift。',
   },
   {

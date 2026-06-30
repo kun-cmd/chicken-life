@@ -17,6 +17,7 @@ export interface ForagingState {
   maxSprintEnergy: number;
   discoveredFoods: ForagingFoodType[];
   foodsEatenToday: ForagingFoodType[];
+  refillWave: number;
 }
 
 export interface DailyFoodSpawn extends Vec2 {
@@ -40,6 +41,7 @@ export function createForagingState(): ForagingState {
     maxSprintEnergy: 100,
     discoveredFoods: ['grain', 'sunflower'],
     foodsEatenToday: [],
+    refillWave: 0,
   };
 }
 
@@ -68,8 +70,17 @@ export function createDailyFoodPlan(
   count: number,
 ): DailyFoodSpawn[] {
   const random = createSeededRandom(runSeed ^ Math.imul(day, 0x9e3779b1));
-  return Array.from({ length: count }, () => ({
-    ...points[Math.floor(random() * points.length)],
+  if (pool.length === 0 || points.length === 0 || count <= 0) return [];
+  const shuffledPoints = [...points];
+  for (let index = shuffledPoints.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [shuffledPoints[index], shuffledPoints[swapIndex]] = [
+      shuffledPoints[swapIndex],
+      shuffledPoints[index],
+    ];
+  }
+  return Array.from({ length: Math.min(count, shuffledPoints.length) }, (_, index) => ({
+    ...shuffledPoints[index],
     type: pool[Math.floor(random() * pool.length)],
   }));
 }
