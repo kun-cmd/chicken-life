@@ -42,6 +42,19 @@ import {
   type DayFlowState,
   type StoryPhase,
 } from '../systems/dayFlow';
+import {
+  createTasteProfile,
+  resolveFoodOffer,
+  touchOptionsFor,
+  type TasteProfile,
+  type TouchOption,
+} from '../systems/closeInteraction';
+import {
+  createRelationshipState,
+  recordTrustMemory,
+  relationshipStage,
+  type RelationshipState,
+} from '../systems/relationship';
 
 export type Phase = 'day' | 'dusk' | 'night' | 'human';
 export type PlayerMode = 'chicken' | 'human';
@@ -181,6 +194,10 @@ export interface GameState {
     fluttering: boolean;
   };
   foraging: ForagingState;
+  relationship: RelationshipState;
+  taste: TasteProfile;
+  closeInteractionUsedToday: boolean;
+  carryingChicken: boolean;
   time: number;
   nightPressure: number;
   nutrition: number;
@@ -312,8 +329,9 @@ function createTutorialEgg(): EggEntity {
 }
 
 export function createGameState(): GameState {
+  const profile = createChickenProfile();
   const state: GameState = {
-    profile: createChickenProfile(),
+    profile,
     saveAvailable: true,
     flow: createDayFlow(),
     day: 1,
@@ -326,6 +344,10 @@ export function createGameState(): GameState {
       fluttering: false,
     },
     foraging: createForagingState(),
+    relationship: createRelationshipState(),
+    taste: createTasteProfile(profile.runSeed),
+    closeInteractionUsedToday: false,
+    carryingChicken: false,
     time: 0.08,
     nightPressure: 0,
     nutrition: 0,
@@ -437,6 +459,32 @@ export function applyFlowEvent(state: GameState, event: DayFlowEvent) {
       }
     }
   }
+}
+
+export function currentRelationshipStage(state: GameState) {
+  return relationshipStage(state.relationship, state.day);
+}
+
+export function applyCloseInteraction(
+  state: GameState,
+  food: ForagingFoodType,
+  touch: TouchOption | null,
+) {
+  if (state.flow.phase !== 'morning-human') return false;
+  const stage = currentRelationshipStage(state);
+  const foodResult = resolveFoodOffer(food, state.taste, stage);
+  if (!foodResult.accepted) {
+    state.message = `${state.profile.name}往后退了一步。`;
+    return false;
+  }
+  if (touch && !touchOptionsFor(stage).includes(touch)) return false;
+  recordTrustMemory(state.relationship, state.day, 'close-interaction');
+  state.closeInteractionUsedToday = true;
+  state.message =
+    foodResult.reaction === 'eager'
+      ? `${state.profile.name}很喜欢这口，啄得又快又轻。`
+      : `${state.profile.name}慢慢把手心里的食物吃完了。`;
+  return true;
 }
 
 export function completeAbilityTutorial(state: GameState, ability: AbilityId) {
@@ -1144,6 +1192,8 @@ export function advanceNightResult(state: GameState) {
   state.waterBoost = 0;
   state.caughtToday = false;
   state.huggedToday = false;
+  state.closeInteractionUsedToday = false;
+  state.carryingChicken = false;
   state.repairedToday = false;
   state.keeperRescueUsedToday = false;
   state.drankToday = false;
@@ -1203,6 +1253,8 @@ export function startNextDay(state: GameState) {
   state.waterBoost = 0;
   state.caughtToday = false;
   state.huggedToday = false;
+  state.closeInteractionUsedToday = false;
+  state.carryingChicken = false;
   state.repairedToday = false;
   state.keeperRescueUsedToday = false;
   state.drankToday = false;
@@ -1334,18 +1386,19 @@ export function restoreGameState(saved: unknown): GameState {
       ? input.flow
       : { day: Number.isFinite(savedDay) && savedDay > 0 ? Math.floor(savedDay) : 1 },
   );
+  const restoredProfile = {
+    ...fresh.profile,
+    ...(input.profile ?? {}),
+    awakenedAbilities: {
+      ...fresh.profile.awakenedAbilities,
+      ...(input.profile?.awakenedAbilities ?? {}),
+    },
+  };
   const restored: GameState = {
     ...fresh,
     ...input,
     flow: restoredFlow,
-    profile: {
-      ...fresh.profile,
-      ...(input.profile ?? {}),
-      awakenedAbilities: {
-        ...fresh.profile.awakenedAbilities,
-        ...(input.profile?.awakenedAbilities ?? {}),
-      },
-    },
+    profile: restoredProfile,
     activeAbilityTutorial: input.activeAbilityTutorial ?? null,
     body: { ...fresh.body, ...(input.body ?? {}) },
     foraging: {
@@ -1358,6 +1411,19 @@ export function restoreGameState(saved: unknown): GameState {
         ? input.foraging.foodsEatenToday
         : fresh.foraging.foodsEatenToday,
     },
+    relationship: {
+      ...fresh.relationship,
+      ...(input.relationship ?? {}),
+      dailyKeys: Array.isArray(input.relationship?.dailyKeys)
+        ? input.relationship.dailyKeys
+        : fresh.relationship.dailyKeys,
+    },
+    taste: {
+      ...createTasteProfile(restoredProfile.runSeed),
+      ...(input.taste ?? {}),
+    },
+    closeInteractionUsedToday: input.closeInteractionUsedToday ?? false,
+    carryingChicken: input.carryingChicken ?? false,
     saveAvailable: input.saveAvailable ?? true,
     chicken: { ...fresh.chicken, ...(input.chicken ?? {}) },
     human: { ...fresh.human, ...(input.human ?? {}) },
