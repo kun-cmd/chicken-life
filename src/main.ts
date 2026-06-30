@@ -2,6 +2,19 @@ import Phaser from 'phaser';
 import './style.css';
 import { GameScene } from './phaser/scenes/GameScene';
 import type { EggType, HudSnapshot } from './game/simulation/state';
+import { foodDisplayName, type ForagingFoodType } from './game/systems/foraging';
+import type { TouchOption } from './game/systems/closeInteraction';
+
+interface CloseInteractionOpenDetail {
+  chickenName: string;
+  foods: ForagingFoodType[];
+  touchOptions: TouchOption[];
+}
+
+interface CloseInteractionPlayDetail {
+  accepted: boolean;
+  touch: TouchOption | null;
+}
 
 new Phaser.Game({
   type: Phaser.AUTO,
@@ -34,6 +47,13 @@ const hud = {
   namingPanel: document.querySelector<HTMLElement>('#namingPanel')!,
   namingForm: document.querySelector<HTMLFormElement>('#namingForm')!,
   chickenNameInput: document.querySelector<HTMLInputElement>('#chickenNameInput')!,
+  closeInteractionPanel: document.querySelector<HTMLElement>('#closeInteractionPanel')!,
+  closeChicken: document.querySelector<HTMLElement>('#closeChicken')!,
+  closeInteractionTitle: document.querySelector<HTMLElement>('#closeInteractionTitle')!,
+  closeInteractionPrompt: document.querySelector<HTMLElement>('#closeInteractionPrompt')!,
+  closeFoodChoices: document.querySelector<HTMLElement>('#closeFoodChoices')!,
+  closeTouchChoices: document.querySelector<HTMLElement>('#closeTouchChoices')!,
+  closeInteractionDone: document.querySelector<HTMLButtonElement>('#closeInteractionDone')!,
   saveWarning: document.querySelector<HTMLElement>('#saveWarning')!,
   dayLabel: document.querySelector<HTMLElement>('#dayLabel')!,
   phaseLabel: document.querySelector<HTMLElement>('#phaseLabel')!,
@@ -59,6 +79,14 @@ const hud = {
 let toastTimer = 0;
 let rewardTimer = 0;
 let debugOpen = false;
+let closeSelectedFood: ForagingFoodType | null = null;
+let closeSelectedTouch: TouchOption | null = null;
+
+const touchLabels: Record<TouchOption, string> = {
+  head: '摸摸头',
+  back: '顺顺背',
+  hold: '轻轻抱起',
+};
 
 appRoot.tabIndex = 0;
 appRoot.addEventListener('pointerdown', () => {
@@ -68,6 +96,29 @@ appRoot.addEventListener('pointerdown', () => {
 
 window.addEventListener('chicken-life:hud', (event) => {
   renderHud((event as CustomEvent<HudSnapshot>).detail);
+});
+
+window.addEventListener('chicken-life:close-open', (event) => {
+  openCloseInteraction((event as CustomEvent<CloseInteractionOpenDetail>).detail);
+});
+
+window.addEventListener('chicken-life:close-play', (event) => {
+  const detail = (event as CustomEvent<CloseInteractionPlayDetail>).detail;
+  hud.closeInteractionPanel.classList.add('close-interaction--playing');
+  hud.closeInteractionPanel.dataset.accepted = detail.accepted ? 'true' : 'false';
+  hud.closeChicken.dataset.touch = detail.touch ?? 'none';
+  hud.closeInteractionDone.disabled = true;
+  hud.closeInteractionDone.textContent = detail.accepted ? '先别动…' : '慢慢收回手…';
+  hud.closeInteractionPrompt.textContent = detail.accepted
+    ? '它歪了歪头，靠近手心，一口一口啄了起来。'
+    : '它闻了闻，往后退了一小步。';
+});
+
+window.addEventListener('chicken-life:close-close', () => {
+  hud.closeInteractionPanel.hidden = true;
+  hud.closeInteractionPanel.classList.remove('close-interaction--playing');
+  delete hud.closeInteractionPanel.dataset.accepted;
+  hud.closeChicken.dataset.touch = 'none';
 });
 
 function renderHud(snapshot: HudSnapshot) {
@@ -110,6 +161,77 @@ function renderHud(snapshot: HudSnapshot) {
     }, 3600);
   }
 }
+
+function openCloseInteraction(detail: CloseInteractionOpenDetail) {
+  closeSelectedFood = null;
+  closeSelectedTouch = null;
+  hud.closeInteractionPanel.hidden = false;
+  hud.closeInteractionPanel.classList.remove('close-interaction--playing');
+  delete hud.closeInteractionPanel.dataset.accepted;
+  hud.closeChicken.dataset.touch = 'none';
+  hud.closeInteractionTitle.textContent = `和${detail.chickenName}靠近一点`;
+  hud.closeInteractionPrompt.textContent = '先选一口放在手心里，它会自己决定要不要靠近。';
+  hud.closeInteractionDone.disabled = true;
+  hud.closeInteractionDone.textContent = '把手慢慢递过去';
+  renderFoodChoices(detail.foods);
+  renderTouchChoices(detail.touchOptions);
+  hud.closeFoodChoices.querySelector<HTMLButtonElement>('button')?.focus();
+}
+
+function renderFoodChoices(foods: ForagingFoodType[]) {
+  hud.closeFoodChoices.replaceChildren();
+  for (const food of foods) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = foodDisplayName(food);
+    button.addEventListener('click', () => {
+      closeSelectedFood = food;
+      setSelectedChoice(hud.closeFoodChoices, button);
+      hud.closeInteractionDone.disabled = false;
+      hud.closeInteractionPrompt.textContent = `把${foodDisplayName(food)}放在掌心，手保持不动。`;
+    });
+    hud.closeFoodChoices.append(button);
+  }
+}
+
+function renderTouchChoices(touchOptions: TouchOption[]) {
+  hud.closeTouchChoices.replaceChildren();
+  const noTouch = document.createElement('button');
+  noTouch.type = 'button';
+  noTouch.textContent = '只喂食';
+  noTouch.dataset.selected = 'true';
+  noTouch.addEventListener('click', () => {
+    closeSelectedTouch = null;
+    setSelectedChoice(hud.closeTouchChoices, noTouch);
+  });
+  hud.closeTouchChoices.append(noTouch);
+
+  for (const touch of touchOptions) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = touchLabels[touch];
+    button.addEventListener('click', () => {
+      closeSelectedTouch = touch;
+      setSelectedChoice(hud.closeTouchChoices, button);
+    });
+    hud.closeTouchChoices.append(button);
+  }
+}
+
+function setSelectedChoice(container: HTMLElement, selected: HTMLButtonElement) {
+  for (const button of container.querySelectorAll<HTMLButtonElement>('button')) {
+    button.dataset.selected = button === selected ? 'true' : 'false';
+  }
+}
+
+hud.closeInteractionDone.addEventListener('click', () => {
+  if (!closeSelectedFood) return;
+  window.dispatchEvent(
+    new CustomEvent('chicken-life:close-complete', {
+      detail: { food: closeSelectedFood, touch: closeSelectedTouch },
+    }),
+  );
+});
 
 hud.namingForm.addEventListener('submit', (event) => {
   event.preventDefault();

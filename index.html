@@ -24,6 +24,35 @@
         </form>
       </section>
 
+      <section
+        id="closeInteractionPanel"
+        class="close-interaction"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="closeInteractionTitle"
+        hidden
+      >
+        <div class="close-interaction__scene" aria-hidden="true">
+          <div class="close-interaction__morning-light"></div>
+          <div id="closeChicken" class="close-chicken"></div>
+          <div class="close-hand"></div>
+        </div>
+        <div class="close-interaction__controls">
+          <span class="close-interaction__eyebrow">清晨近景</span>
+          <h2 id="closeInteractionTitle">把手放低一点</h2>
+          <p id="closeInteractionPrompt">等它看清你手里的食物，再慢慢靠近。</p>
+          <div class="close-interaction__group">
+            <span>手心里放什么</span>
+            <div id="closeFoodChoices" class="close-choice-row"></div>
+          </div>
+          <div class="close-interaction__group">
+            <span>吃完以后</span>
+            <div id="closeTouchChoices" class="close-choice-row"></div>
+          </div>
+          <button id="closeInteractionDone" type="button" disabled>把手慢慢递过去</button>
+        </div>
+      </section>
+
       <div id="saveWarning" class="save-warning" role="status" hidden>
         浏览器未允许保存；关闭页面后本次进度会消失。
       </div>

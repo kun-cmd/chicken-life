@@ -28,6 +28,7 @@ import {
 } from '../../game/persistence/saveGame';
 import {
   advanceNightResult,
+  applyCloseInteraction,
   applyFlowEvent,
   buildHudSnapshot,
   callKeeperForWeasel,
@@ -35,6 +36,7 @@ import {
   collectEgg,
   completeAbilityTutorial,
   createGameState,
+  currentRelationshipStage,
   debugAddAffection,
   debugAddMaterials,
   debugJumpToDusk,
@@ -43,7 +45,6 @@ import {
   drinkAtPond,
   expireFoods,
   finishNightResult,
-  hugChicken,
   improveCoopAbility,
   isFoodLockedByAnimal,
   isNearLight,
@@ -69,6 +70,8 @@ import {
 import type { EggType, FoodEntity, HoleEntity, Vec2, YardAnimal } from '../../game/simulation/state';
 import type { InputActions } from '../../game/input/actions';
 import { KeyboardState } from '../../game/input/keyboardState';
+import { isForagingFood } from '../../game/systems/foraging';
+import { touchOptionsFor, type TouchOption } from '../../game/systems/closeInteraction';
 
 type FoodView = Phaser.GameObjects.Image & { foodId: number };
 type AnimalView = Phaser.GameObjects.Image & { animalId: number; animalType: YardAnimal['type'] };
@@ -95,6 +98,9 @@ const SFX_UPGRADE_KEY = 'sfx-upgrade';
 const SFX_NIGHT_RUSTLE_KEY = 'sfx-night-rustle';
 const CHICKEN_WALK_MOVE_EPSILON = 0.04;
 const CHICKEN_WALK_TELEPORT_DISTANCE = 28;
+const CLOSE_INTERACTION_RANGE = 74;
+const CLOSE_INTERACTION_DURATION = 4800;
+const CLOSE_INTERACTION_REDUCED_DURATION = 720;
 const GAMEPLAY_KEY_CODES = new Set([
   'ArrowUp',
   'ArrowDown',
@@ -178,16 +184,31 @@ export class GameScene extends Phaser.Scene {
   private musicUnlocked = false;
   private masterVolume = loadSavedMasterVolume();
   private recentCluckSfx: string[] = [];
+  private closeInteractionOpen = false;
+  private closeInteractionAnimating = false;
+  private closeInteractionTimer: Phaser.Time.TimerEvent | null = null;
 
   private handleGameplayKeyDown = (event: KeyboardEvent) => {
-    if (!this.state.profile.named || isTextEntryTarget(event.target)) return;
+    if (
+      this.closeInteractionOpen ||
+      !this.state.profile.named ||
+      isTextEntryTarget(event.target)
+    ) {
+      return;
+    }
     if (!GAMEPLAY_KEY_CODES.has(event.code)) return;
     this.keyboardState.keyDown(event.code, event.repeat);
     event.preventDefault();
   };
 
   private handleGameplayKeyUp = (event: KeyboardEvent) => {
-    if (!this.state.profile.named || isTextEntryTarget(event.target)) return;
+    if (
+      this.closeInteractionOpen ||
+      !this.state.profile.named ||
+      isTextEntryTarget(event.target)
+    ) {
+      return;
+    }
     if (!GAMEPLAY_KEY_CODES.has(event.code)) return;
     this.keyboardState.keyUp(event.code);
     event.preventDefault();
@@ -206,6 +227,42 @@ export class GameScene extends Phaser.Scene {
     setChickenName(this.state, name);
     this.resetGameplayKeys();
     this.emitHud(true, true);
+  };
+
+  private handleCloseInteractionComplete = (event: Event) => {
+    if (!this.closeInteractionOpen || this.closeInteractionAnimating) return;
+    const detail = (event as CustomEvent<{ food?: unknown; touch?: unknown }>).detail;
+    const food = typeof detail?.food === 'string' ? detail.food : '';
+    const touch = detail?.touch === null ? null : detail?.touch;
+    if (!isForagingFood(food) || !isTouchOptionOrNull(touch)) return;
+
+    const accepted = applyCloseInteraction(this.state, food, touch);
+    this.closeInteractionAnimating = true;
+    this.resetGameplayKeys();
+    this.saveGame(true);
+    window.dispatchEvent(
+      new CustomEvent('chicken-life:close-play', {
+        detail: { accepted, touch: accepted ? touch : null },
+      }),
+    );
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const duration = accepted
+      ? reducedMotion
+        ? CLOSE_INTERACTION_REDUCED_DURATION
+        : CLOSE_INTERACTION_DURATION
+      : reducedMotion
+        ? 420
+        : 1450;
+    if (accepted) this.scheduleCloseInteractionPecks(reducedMotion);
+    this.closeInteractionTimer = this.time.delayedCall(duration, () => {
+      this.closeInteractionOpen = false;
+      this.closeInteractionAnimating = false;
+      this.closeInteractionTimer = null;
+      window.dispatchEvent(new CustomEvent('chicken-life:close-close'));
+      if (accepted && touch) this.showHeartFx(this.state.chicken);
+      this.emitHud(true, true);
+    });
   };
 
   constructor() {
@@ -288,10 +345,12 @@ export class GameScene extends Phaser.Scene {
     window.addEventListener('chicken-life:debug', this.handleDebugEvent);
     window.addEventListener('chicken-life:volume', this.handleVolumeEvent);
     window.addEventListener('chicken-life:name-confirmed', this.handleNameConfirmed);
+    window.addEventListener('chicken-life:close-complete', this.handleCloseInteractionComplete);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('chicken-life:debug', this.handleDebugEvent);
       window.removeEventListener('chicken-life:volume', this.handleVolumeEvent);
       window.removeEventListener('chicken-life:name-confirmed', this.handleNameConfirmed);
+      window.removeEventListener('chicken-life:close-complete', this.handleCloseInteractionComplete);
       window.removeEventListener('keydown', this.handleMusicUnlock);
       window.removeEventListener('keydown', this.handleGameplayKeyDown, { capture: true });
       window.removeEventListener('keyup', this.handleGameplayKeyUp, { capture: true });
@@ -300,6 +359,7 @@ export class GameScene extends Phaser.Scene {
       this.input.off('pointerdown', this.handleMusicUnlock);
       this.dayMusic?.stop();
       this.nightMusic?.stop();
+      this.closeInteractionTimer?.remove(false);
     });
     this.applySceneViewFromState();
     this.emitHud(true);
@@ -309,6 +369,13 @@ export class GameScene extends Phaser.Scene {
     const dt = Math.min(deltaMs / 1000, 0.05);
     if (!this.state.profile.named) {
       this.updateSprites(dt);
+      return;
+    }
+
+    if (this.closeInteractionOpen) {
+      this.resetGameplayKeys();
+      this.updateSprites(0);
+      this.updateMusic();
       return;
     }
 
@@ -688,12 +755,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (actions.interactPressed) {
-      if (distance(this.state.human, this.state.chicken) < 74) {
-        if (hugChicken(this.state)) {
-          this.chickenLiftTimer = 0.85;
-          this.showHeartFx(this.state.chicken);
-          this.playCloseMoment();
-        }
+      if (distance(this.state.human, this.state.chicken) < CLOSE_INTERACTION_RANGE) {
+        this.openCloseInteraction();
       } else if (nearCoop) {
         if (repairCoop(this.state)) {
           this.playSfx(SFX_REWARD_KEY, 0.58);
@@ -701,10 +764,32 @@ export class GameScene extends Phaser.Scene {
           this.playCloseMoment();
         }
       } else {
-        this.state.message = '靠近鸡可以抱一抱；靠近鸡窝可以用木料修缮。';
+        this.state.message = '靠近鸡可以手喂和陪伴；靠近鸡窝可以用木料修缮。';
       }
     }
 
+  }
+
+  private openCloseInteraction() {
+    this.closeInteractionOpen = true;
+    this.closeInteractionAnimating = false;
+    this.resetGameplayKeys();
+    window.dispatchEvent(
+      new CustomEvent('chicken-life:close-open', {
+        detail: {
+          chickenName: this.state.profile.name,
+          foods: [...this.state.foraging.discoveredFoods],
+          touchOptions: touchOptionsFor(currentRelationshipStage(this.state)),
+        },
+      }),
+    );
+  }
+
+  private scheduleCloseInteractionPecks(reducedMotion: boolean) {
+    const beats = reducedMotion ? [180, 330, 480] : [1680, 2240, 2800];
+    for (const delay of beats) {
+      this.time.delayedCall(delay, () => this.playSfx(SFX_PECK_KEY, 0.5));
+    }
   }
 
   private updateDuskCollection(dt: number, actions: InputActions, humanNearCoop: boolean) {
@@ -1760,6 +1845,10 @@ function isTextEntryTarget(target: EventTarget | null) {
     target instanceof HTMLSelectElement ||
     (target instanceof HTMLElement && target.isContentEditable)
   );
+}
+
+function isTouchOptionOrNull(value: unknown): value is TouchOption | null {
+  return value === null || value === 'head' || value === 'back' || value === 'hold';
 }
 
 function normalize(x: number, y: number): Vec2 {
