@@ -62,3 +62,7 @@ export const YARD_UPGRADES: YardUpgradeDefinition[] = [
     effect: '缩短鸡进窝后的关门动作',
   },
 ];
+
+export function isYardUpgradeId(value: unknown): value is YardUpgradeId {
+  return YARD_UPGRADES.some((upgrade) => upgrade.id === value);
+}

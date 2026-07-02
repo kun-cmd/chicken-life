@@ -20,6 +20,13 @@ import {
   isOnPath,
 } from '../../game/content/yard';
 import { tutorialForAbility } from '../../game/content/abilityTutorials';
+import { EGG_SPOTS, type EggSpot } from '../../game/content/eggSpots';
+import {
+  YARD_LAMP_POSITION,
+  YARD_UPGRADES,
+  isYardUpgradeId,
+  type YardUpgradeId,
+} from '../../game/content/yardUpgrades';
 import { canUseAbility } from '../../game/systems/abilities';
 import {
   COOP_FINAL_SEED_RANGE,
@@ -92,6 +99,12 @@ import type { InputActions } from '../../game/input/actions';
 import { KeyboardState } from '../../game/input/keyboardState';
 import { isForagingFood } from '../../game/systems/foraging';
 import { touchOptionsFor, type TouchOption } from '../../game/systems/closeInteraction';
+import { advanceEggSearch } from '../../game/systems/eggSearch';
+import {
+  buyUpgrade,
+  coopEntryRadius,
+  doorCloseDurationMs,
+} from '../../game/systems/yardUpgrades';
 
 type FoodView = Phaser.GameObjects.Image & { foodId: number };
 type AnimalView = Phaser.GameObjects.Image & { animalId: number; animalType: YardAnimal['type'] };
@@ -186,11 +199,15 @@ export class GameScene extends Phaser.Scene {
   private holeViews = new Map<number, Phaser.GameObjects.Image>();
   private animalViews = new Map<number, AnimalView>();
   private eggView: Phaser.GameObjects.Container | null = null;
+  private eggClueView: Phaser.GameObjects.Graphics | null = null;
+  private eggClueSpotId: string | null = null;
   private duskSeedViews = new Map<number, Phaser.GameObjects.Image>();
+  private yardUpgradeGraphics!: Phaser.GameObjects.Graphics;
   private coopDoorInterior!: Phaser.GameObjects.Rectangle;
   private coopDoorPanel!: Phaser.GameObjects.Rectangle;
   private humanLanternGlow!: Phaser.GameObjects.Arc;
   private duskVisionRing!: Phaser.GameObjects.Arc;
+  private yardLampGlow!: Phaser.GameObjects.Arc;
   private houseResponseLight: Phaser.GameObjects.Arc | null = null;
   private lastHudAt = 0;
   private nightResultTimer = 0;
@@ -199,6 +216,8 @@ export class GameScene extends Phaser.Scene {
   private scratchProgress = 0;
   private drinkSfxCooldown = 0;
   private caughtCooldown = 0;
+  private eggClueSoundCooldown = 0;
+  private eggDirectionTimer = 7.5;
   private chickenLiftTimer = 0;
   private chickenWalkPhase = 0;
   private chickenWalkBlend = 0;
@@ -215,10 +234,13 @@ export class GameScene extends Phaser.Scene {
   private closeInteractionOpen = false;
   private closeInteractionAnimating = false;
   private closeInteractionTimer: Phaser.Time.TimerEvent | null = null;
+  private yardPanelOpen = false;
+  private coopDoorClosing = false;
 
   private handleGameplayKeyDown = (event: KeyboardEvent) => {
     if (
       this.closeInteractionOpen ||
+      this.yardPanelOpen ||
       !this.state.profile.named ||
       isTextEntryTarget(event.target)
     ) {
@@ -232,6 +254,7 @@ export class GameScene extends Phaser.Scene {
   private handleGameplayKeyUp = (event: KeyboardEvent) => {
     if (
       this.closeInteractionOpen ||
+      this.yardPanelOpen ||
       !this.state.profile.named ||
       isTextEntryTarget(event.target)
     ) {
@@ -291,6 +314,33 @@ export class GameScene extends Phaser.Scene {
       if (accepted && touch) this.showHeartFx(this.state.chicken);
       this.emitHud(true, true);
     });
+  };
+
+  private handleYardPanelOpen = () => {
+    this.yardPanelOpen = true;
+    this.resetGameplayKeys();
+  };
+
+  private handleYardPanelClose = () => {
+    this.yardPanelOpen = false;
+    this.resetGameplayKeys();
+  };
+
+  private handleBuyUpgrade = (event: Event) => {
+    const id = (event as CustomEvent<{ id?: unknown }>).detail?.id;
+    if (!isYardUpgradeId(id)) return;
+    const upgrade = YARD_UPGRADES.find((item) => item.id === id);
+    if (!upgrade || !buyUpgrade(this.state.yard, id)) {
+      this.state.message = upgrade
+        ? `修建${upgrade.name}需要 ${upgrade.cost} 份木料。`
+        : '这项修缮现在还不能进行。';
+      this.emitHud(true, true);
+      return;
+    }
+    this.drawOwnedYardUpgrades();
+    this.playSfx(SFX_UPGRADE_KEY, 0.58);
+    this.state.message = `${upgrade.name}修好了，院子里多了一处新地方。`;
+    this.emitHud(true, true);
   };
 
   constructor() {
@@ -375,6 +425,8 @@ export class GameScene extends Phaser.Scene {
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
     this.createGeneratedTextures();
     this.drawYard();
+    this.yardUpgradeGraphics = this.add.graphics().setDepth(36);
+    this.drawOwnedYardUpgrades();
     this.createFoodViews();
     this.createHoleViews();
     this.chicken = this.createChickenSprite(this.state.chicken);
@@ -389,11 +441,17 @@ export class GameScene extends Phaser.Scene {
     window.addEventListener('chicken-life:volume', this.handleVolumeEvent);
     window.addEventListener('chicken-life:name-confirmed', this.handleNameConfirmed);
     window.addEventListener('chicken-life:close-complete', this.handleCloseInteractionComplete);
+    window.addEventListener('chicken-life:yard-panel-open', this.handleYardPanelOpen);
+    window.addEventListener('chicken-life:yard-panel-close', this.handleYardPanelClose);
+    window.addEventListener('chicken-life:buy-upgrade', this.handleBuyUpgrade);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('chicken-life:debug', this.handleDebugEvent);
       window.removeEventListener('chicken-life:volume', this.handleVolumeEvent);
       window.removeEventListener('chicken-life:name-confirmed', this.handleNameConfirmed);
       window.removeEventListener('chicken-life:close-complete', this.handleCloseInteractionComplete);
+      window.removeEventListener('chicken-life:yard-panel-open', this.handleYardPanelOpen);
+      window.removeEventListener('chicken-life:yard-panel-close', this.handleYardPanelClose);
+      window.removeEventListener('chicken-life:buy-upgrade', this.handleBuyUpgrade);
       window.removeEventListener('keydown', this.handleMusicUnlock);
       window.removeEventListener('keydown', this.handleGameplayKeyDown, { capture: true });
       window.removeEventListener('keyup', this.handleGameplayKeyUp, { capture: true });
@@ -415,7 +473,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (this.closeInteractionOpen) {
+    if (this.closeInteractionOpen || this.yardPanelOpen) {
       this.resetGameplayKeys();
       this.updateSprites(0);
       this.updateMusic();
@@ -735,7 +793,11 @@ export class GameScene extends Phaser.Scene {
       onPath: isOnPath(position),
       nearCoop: distance(position, COOP_DOOR) < 150,
       nearLight:
-        isNearLight(position, this.state.stats.lamp) ||
+        isNearLight(
+          position,
+          this.state.stats.lamp,
+          this.state.yard.owned.includes('yard-lamp'),
+        ) ||
         (this.state.flow.phase === 'dusk-human' && distance(position, this.state.human) < 150),
     });
   }
@@ -813,7 +875,11 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    if (this.state.egg && !this.state.egg.found) {
+      this.state.eggSearch = advanceEggSearch(this.state.eggSearch, dt);
+    }
     updateMorningChickenWander(this.state, dt);
+    this.updateEggGuidance(dt);
 
     if (actions.interactPressed && nearHouseDoor) {
       if (!this.state.flow.morningEggFound) {
@@ -826,18 +892,15 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    let searchedForEgg = false;
     if (this.state.egg && !this.state.egg.found) {
       const eggDistance = distance(this.state.human, this.state.egg);
-      if (eggDistance < 132) this.showEggClue();
       if (actions.searchPressed) {
-        searchedForEgg = true;
         if (eggDistance < 76) {
           collectEgg(this.state);
           applyFlowEvent(this.state, { type: 'egg-found' });
           this.playSfx(SFX_REWARD_KEY, 0.64);
           this.revealEgg();
-          this.state.message = '蛋找到了。还可以陪陪鸡，准备好后回房门口按 E 回屋。';
+          this.clearEggClueView();
         } else {
           this.state.message = `这里没有蛋；${this.state.profile.name}抬起头，朝藏蛋的方向叫了两声。`;
           this.showEggDirectionClue();
@@ -888,6 +951,7 @@ export class GameScene extends Phaser.Scene {
     if (this.duskCollection.phase !== 'inside') {
       this.updatePressure(dt * DUSK_PRESSURE_TIME_SCALE);
     }
+    if (this.coopDoorClosing) return;
 
     if (actions.peckPressed) {
       const seed = placeLureSeed(
@@ -907,11 +971,7 @@ export class GameScene extends Phaser.Scene {
       if (!humanNearCoop) {
         this.state.message = '开关鸡舍门需要站在门边。';
       } else if (canCloseCoopDoor(this.duskCollection)) {
-        applyFlowEvent(this.state, { type: 'close-door' });
-        finishNightResult(this.state);
-        this.nightResultTimer = 2.4;
-        this.syncCoopDoorView();
-        this.emitHud(true, true);
+        this.startCoopDoorClose();
         return;
       } else if (this.duskCollection.phase === 'coop-open') {
         this.state.message = `${this.state.profile.name}还在进窝，先等它跨过门槛。`;
@@ -931,7 +991,10 @@ export class GameScene extends Phaser.Scene {
         COOP_DOOR.y - this.state.chicken.y,
       );
       this.tryMoveDuskChicken(towardDoor, LURE_SEED_MOVE_SPEED, dt);
-      if (distance(this.state.chicken, COOP_DOOR) < 30 && markChickenInside(this.duskCollection)) {
+      if (
+        distance(this.state.chicken, COOP_DOOR) < coopEntryRadius(this.state.yard) &&
+        markChickenInside(this.duskCollection)
+      ) {
         applyFlowEvent(this.state, { type: 'chicken-entered-coop' });
         this.clearDuskSeedViews();
         this.chicken.setVisible(false);
@@ -956,6 +1019,29 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private startCoopDoorClose() {
+    this.coopDoorClosing = true;
+    this.resetGameplayKeys();
+    const doorCenter = { x: COOP.x + 50, y: COOP.y + 107 };
+    const duration = doorCloseDurationMs(this.state.yard);
+    this.state.message = '你扶住鸡舍门，慢慢把它合上。';
+    this.emitHud(true);
+    this.tweens.add({
+      targets: this.coopDoorPanel,
+      x: doorCenter.x,
+      duration,
+      ease: 'Sine.easeInOut',
+      onComplete: () => {
+        applyFlowEvent(this.state, { type: 'close-door' });
+        finishNightResult(this.state);
+        this.nightResultTimer = 2.4;
+        this.coopDoorClosing = false;
+        this.syncCoopDoorView();
+        this.emitHud(true, true);
+      },
+    });
+  }
+
   private tryMoveDuskChicken(direction: Vec2, speed: number, dt: number) {
     if (!direction.x && !direction.y) return;
     const target = {
@@ -969,6 +1055,9 @@ export class GameScene extends Phaser.Scene {
 
   private switchToHuman() {
     this.duskCollection = createDuskCollectionState();
+    this.coopDoorClosing = false;
+    this.eggClueSoundCooldown = 0;
+    this.eggDirectionTimer = 7.5;
     this.clearDuskSeedViews();
     this.clearHouseResponseLight();
     this.chicken.setVisible(true);
@@ -984,6 +1073,8 @@ export class GameScene extends Phaser.Scene {
 
   private switchToChicken() {
     this.duskCollection = createDuskCollectionState();
+    this.coopDoorClosing = false;
+    this.clearEggClueView();
     this.clearDuskSeedViews();
     this.clearHouseResponseLight();
     this.chicken.setVisible(true);
@@ -1003,12 +1094,14 @@ export class GameScene extends Phaser.Scene {
 
   private rebuildWorldFromState() {
     this.clearAnimalViews();
+    this.clearEggClueView();
     for (const view of this.holeViews.values()) view.destroy();
     this.holeViews.clear();
     this.eggView?.destroy();
     this.eggView = null;
     this.createFoodViews();
     this.createHoleViews();
+    this.drawOwnedYardUpgrades();
     this.applySceneViewFromState();
   }
 
@@ -1255,6 +1348,10 @@ export class GameScene extends Phaser.Scene {
       .setStrokeStyle(2, 0xffdf8a, 0.3)
       .setDepth(38)
       .setVisible(false);
+    this.yardLampGlow = this.add
+      .circle(YARD_LAMP_POSITION.x, YARD_LAMP_POSITION.y, 138, 0xffd98a, 0.12)
+      .setDepth(96)
+      .setVisible(false);
     this.syncCoopDoorView();
   }
 
@@ -1490,6 +1587,50 @@ export class GameScene extends Phaser.Scene {
     g.generateTexture(key, WORLD_WIDTH, WORLD_HEIGHT);
     g.destroy();
     this.add.image(0, 0, key).setOrigin(0).setDepth(0);
+  }
+
+  private drawOwnedYardUpgrades() {
+    if (!this.yardUpgradeGraphics) return;
+    const g = this.yardUpgradeGraphics;
+    g.clear();
+
+    for (const id of this.state.yard.owned) {
+      const upgrade = YARD_UPGRADES.find((item) => item.id === id);
+      if (!upgrade) continue;
+      const { x, y } = upgrade.position;
+
+      if (id === 'loose-soil') {
+        g.fillStyle(0x6a432b, 0.86).fillEllipse(x, y, 116, 64);
+        g.lineStyle(3, 0x3f2b20, 0.6);
+        for (let offset = -36; offset <= 36; offset += 24) {
+          g.lineBetween(x + offset - 8, y - 10, x + offset + 8, y + 12);
+        }
+      } else if (id === 'shade-shelter') {
+        g.lineStyle(7, 0x694228, 1);
+        g.lineBetween(x - 54, y - 28, x - 54, y + 38);
+        g.lineBetween(x + 54, y - 28, x + 54, y + 38);
+        g.fillStyle(0x6d7451, 0.96).fillRoundedRect(x - 70, y - 44, 140, 30, 8);
+      } else if (id === 'low-perch') {
+        g.lineStyle(8, 0x5c3924, 1);
+        g.lineBetween(x - 54, y + 24, x - 38, y - 18);
+        g.lineBetween(x + 54, y + 24, x + 38, y - 18);
+        g.lineStyle(11, 0x80522f, 1);
+        g.lineBetween(x - 60, y - 18, x + 60, y - 18);
+      } else if (id === 'coop-ramp') {
+        g.fillStyle(0x8a5938, 1).fillRoundedRect(x - 52, y - 15, 104, 38, 5);
+        g.lineStyle(3, 0xc48a55, 0.9);
+        for (let offset = -34; offset <= 34; offset += 17) {
+          g.lineBetween(x + offset, y - 13, x + offset, y + 21);
+        }
+      } else if (id === 'yard-lamp') {
+        g.lineStyle(7, 0x49382d, 1).lineBetween(x, y + 52, x, y - 38);
+        g.fillStyle(0xe7b85f, 1).fillCircle(x, y - 45, 13);
+        g.fillStyle(0xffe6a4, 0.85).fillCircle(x, y - 47, 7);
+      } else if (id === 'door-latch') {
+        g.fillStyle(0xb9ad92, 1).fillRoundedRect(x - 22, y - 5, 44, 10, 3);
+        g.fillStyle(0x665e51, 1).fillCircle(x - 24, y, 7);
+      }
+    }
   }
 
   private drawRect(g: Phaser.GameObjects.Graphics, rect: { x: number; y: number; width: number; height: number }, color: number, alpha: number) {
@@ -1762,42 +1903,89 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private showEggClue() {
-    if (!this.state.egg || this.state.egg.found || !this.eggView) return;
-    const distanceToEgg = distance(this.state.human, this.state.egg);
-    if (distanceToEgg < 92) {
-      this.eggView.setVisible(true);
-      this.eggView.setAlpha(Phaser.Math.Clamp(1 - distanceToEgg / 110, 0.18, 0.72));
+  private currentEggSpot(): EggSpot | null {
+    return EGG_SPOTS.find((spot) => spot.id === this.state.eggSearch.spotId) ?? null;
+  }
+
+  private updateEggGuidance(dt: number) {
+    this.eggClueSoundCooldown = Math.max(0, this.eggClueSoundCooldown - dt);
+    this.eggDirectionTimer = Math.max(0, this.eggDirectionTimer - dt);
+    if (!this.state.egg || this.state.egg.found) return;
+
+    if (
+      this.state.eggSearch.clueLevel >= 1 &&
+      distance(this.state.human, this.state.egg) < 360 &&
+      this.eggClueSoundCooldown === 0
+    ) {
+      this.playSfx(SFX_NIGHT_RUSTLE_KEY, 0.14);
+      this.eggClueSoundCooldown = 6;
     }
+
+    if (this.state.eggSearch.clueLevel >= 2 && this.eggDirectionTimer === 0) {
+      this.showEggDirectionClue();
+      this.eggDirectionTimer = 7.5;
+    }
+  }
+
+  private syncEggClueView() {
+    const spot = this.currentEggSpot();
+    const visible =
+      this.state.flow.phase === 'morning-human' &&
+      Boolean(this.state.egg && !this.state.egg.found && spot);
+    if (!visible || !spot) {
+      this.clearEggClueView();
+      return;
+    }
+
+    if (this.eggClueSpotId !== spot.id) {
+      this.clearEggClueView();
+      const g = this.add.graphics().setPosition(spot.cluePosition.x, spot.cluePosition.y).setDepth(42);
+      if (spot.clueKind === 'feather') {
+        g.fillStyle(0xf4e7c9, 0.9).fillEllipse(0, 0, 22, 9);
+        g.lineStyle(2, 0xb99d76, 0.8).lineBetween(-10, 5, 12, -7);
+      } else if (spot.clueKind === 'bent-grass') {
+        g.lineStyle(3, 0x70854e, 0.9);
+        g.lineBetween(-13, 10, -5, -11);
+        g.lineBetween(-5, -11, 9, 2);
+        g.lineBetween(3, 11, 13, -8);
+      } else if (spot.clueKind === 'scratched-soil') {
+        g.fillStyle(0x704a31, 0.54).fillEllipse(0, 3, 50, 24);
+        g.lineStyle(2, 0x3f2b20, 0.85);
+        g.lineBetween(-17, -5, 4, 8);
+        g.lineBetween(-5, -9, 15, 5);
+        g.lineBetween(6, -8, 22, 3);
+      } else {
+        g.fillStyle(0xf3e6c5, 0.88);
+        g.fillTriangle(-12, 4, -5, -7, 1, 5);
+        g.fillTriangle(4, 6, 10, -5, 16, 7);
+      }
+      this.eggClueView = g;
+      this.eggClueSpotId = spot.id;
+    }
+
+    const level = this.state.eggSearch.clueLevel;
+    const pulse = level === 2 ? 0.08 * Math.sin(this.time.now / 280) : 0;
+    this.eggClueView?.setAlpha(level === 0 ? 0.28 : level === 1 ? 0.5 : 0.72 + pulse);
+    this.eggClueView?.setScale(level === 2 ? 1.08 : 1);
+  }
+
+  private clearEggClueView() {
+    this.eggClueView?.destroy();
+    this.eggClueView = null;
+    this.eggClueSpotId = null;
   }
 
   private showEggDirectionClue() {
     if (!this.state.egg || this.state.egg.found) return;
     const dx = this.state.egg.x - this.state.chicken.x;
-    const dy = this.state.egg.y - this.state.chicken.y;
-    const angle = Math.atan2(dy, dx);
-    const arrows = ['→', '↘', '↓', '↙', '←', '↖', '↑', '↗'];
-    const arrow = arrows[(Math.round(angle / (Math.PI / 4)) + arrows.length) % arrows.length];
     this.state.chickenWander.target = null;
     this.state.chickenWander.pause = 1.2;
     if (Math.abs(dx) > 2) this.state.chickenWander.facing = dx > 0 ? 1 : -1;
     this.showCluckFx(this.state.chicken, 0);
-
-    const hint = this.add.text(this.state.chicken.x, this.state.chicken.y - 70, `${arrow} 蛋在那边`, {
-      fontFamily: 'Arial, "Microsoft YaHei", sans-serif',
-      fontSize: '18px',
-      fontStyle: '700',
-      color: '#fff2b5',
-      stroke: '#3c2a1c',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(83);
-    this.tweens.add({
-      targets: hint,
-      y: hint.y - 18,
-      alpha: 0,
-      duration: 1100,
-      ease: 'Sine.easeOut',
-      onComplete: () => hint.destroy(),
+    this.time.delayedCall(260, () => {
+      if (this.state.flow.phase === 'morning-human') {
+        this.showCluckFx(this.state.chicken, 0);
+      }
     });
   }
 
@@ -1847,6 +2035,13 @@ export class GameScene extends Phaser.Scene {
       ?.setVisible(showEscortLantern && this.duskCollection.phase !== 'inside')
       .setPosition(this.state.chicken.x, this.state.chicken.y)
       .setRadius(visionRadiusFor(this.state.affection));
+    const showYardLamp =
+      this.state.yard.owned.includes('yard-lamp') &&
+      (this.state.flow.phase === 'chicken-dusk' ||
+        this.state.flow.phase === 'dusk-human' ||
+        this.state.flow.phase === 'night-result');
+    this.yardLampGlow?.setVisible(showYardLamp);
+    this.syncEggClueView();
     this.keeper.setPosition(this.state.keeper.x, this.state.keeper.y);
     this.keeper.setVisible(this.state.mode === 'chicken' && this.state.keeper.active);
     this.keeper.scaleX = this.state.keeper.facing;

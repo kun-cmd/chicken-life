@@ -53,6 +53,29 @@
         </div>
       </section>
 
+      <section
+        id="yardPanel"
+        class="yard-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="yardPanelTitle"
+        hidden
+      >
+        <div class="panel-head">
+          <div>
+            <span>小院手记</span>
+            <h2 id="yardPanelTitle">蛋相册与修缮</h2>
+          </div>
+          <button id="yardPanelClose" type="button" aria-label="关闭小院手记">×</button>
+        </div>
+        <p id="yardWoodSummary" class="yard-panel__wood">现有木料 0</p>
+        <h3>蛋相册</h3>
+        <div id="eggAlbumList" class="panel-list"></div>
+        <h3>修缮</h3>
+        <div id="upgradeChoices" class="upgrade-grid"></div>
+        <p class="yard-panel__hint">Tab 打开 · Esc 关闭</p>
+      </section>
+
       <div id="saveWarning" class="save-warning" role="status" hidden>
         浏览器未允许保存；关闭页面后本次进度会消失。
       </div>

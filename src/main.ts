@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import './style.css';
 import { GameScene } from './phaser/scenes/GameScene';
 import type { EggType, HudSnapshot } from './game/simulation/state';
+import { YARD_UPGRADES } from './game/content/yardUpgrades';
 import { foodDisplayName, type ForagingFoodType } from './game/systems/foraging';
 import type { TouchOption } from './game/systems/closeInteraction';
 
@@ -54,6 +55,11 @@ const hud = {
   closeFoodChoices: document.querySelector<HTMLElement>('#closeFoodChoices')!,
   closeTouchChoices: document.querySelector<HTMLElement>('#closeTouchChoices')!,
   closeInteractionDone: document.querySelector<HTMLButtonElement>('#closeInteractionDone')!,
+  yardPanel: document.querySelector<HTMLElement>('#yardPanel')!,
+  yardPanelClose: document.querySelector<HTMLButtonElement>('#yardPanelClose')!,
+  yardWoodSummary: document.querySelector<HTMLElement>('#yardWoodSummary')!,
+  eggAlbumList: document.querySelector<HTMLElement>('#eggAlbumList')!,
+  upgradeChoices: document.querySelector<HTMLElement>('#upgradeChoices')!,
   saveWarning: document.querySelector<HTMLElement>('#saveWarning')!,
   dayLabel: document.querySelector<HTMLElement>('#dayLabel')!,
   phaseLabel: document.querySelector<HTMLElement>('#phaseLabel')!,
@@ -79,6 +85,8 @@ const hud = {
 let toastTimer = 0;
 let rewardTimer = 0;
 let debugOpen = false;
+let yardPanelOpen = false;
+let latestSnapshot: HudSnapshot | null = null;
 let closeSelectedFood: ForagingFoodType | null = null;
 let closeSelectedTouch: TouchOption | null = null;
 
@@ -122,6 +130,7 @@ window.addEventListener('chicken-life:close-close', () => {
 });
 
 function renderHud(snapshot: HudSnapshot) {
+  latestSnapshot = snapshot;
   hud.namingPanel.hidden = !snapshot.requiresNaming;
   hud.saveWarning.hidden = snapshot.saveAvailable;
   if (snapshot.requiresNaming && document.activeElement !== hud.chickenNameInput) {
@@ -136,6 +145,7 @@ function renderHud(snapshot: HudSnapshot) {
   hud.sprintWrap.hidden = !snapshot.showSprint;
   hud.staminaMeter.style.width = `${snapshot.staminaPct}%`;
   hud.contextPrompt.textContent = snapshot.contextPrompt;
+  if (yardPanelOpen) renderYardPanel(snapshot);
 
   document.body.dataset.phase = snapshot.phase;
   document.body.dataset.mode = snapshot.mode;
@@ -159,6 +169,70 @@ function renderHud(snapshot: HudSnapshot) {
       hud.rewardPanel.classList.remove('reward-panel--show');
       hud.rewardPanel.hidden = true;
     }, 3600);
+  }
+}
+
+function renderYardPanel(snapshot: HudSnapshot) {
+  const pending = snapshot.yard.pendingWood;
+  hud.yardWoodSummary.textContent =
+    pending > 0
+      ? `现有木料 ${snapshot.yard.wood} · 明早送到 ${pending}`
+      : `现有木料 ${snapshot.yard.wood}`;
+
+  hud.eggAlbumList.replaceChildren();
+  if (snapshot.eggArchive.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'panel-empty';
+    empty.textContent = '找到第一枚蛋后，相册会记在这里。';
+    hud.eggAlbumList.append(empty);
+  } else {
+    for (const egg of snapshot.eggArchive) {
+      const row = document.createElement('article');
+      row.className = 'album-entry';
+      const name = document.createElement('strong');
+      name.textContent = `${egg.name} ×${egg.count}`;
+      const effect = document.createElement('span');
+      effect.textContent = egg.effect;
+      row.append(name, effect);
+      hud.eggAlbumList.append(row);
+    }
+  }
+
+  hud.upgradeChoices.replaceChildren();
+  for (const upgrade of YARD_UPGRADES) {
+    const owned = snapshot.yard.owned.includes(upgrade.id);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'upgrade-choice';
+    button.disabled = owned || snapshot.yard.wood < upgrade.cost;
+    button.dataset.owned = owned ? 'true' : 'false';
+
+    const heading = document.createElement('strong');
+    heading.textContent = owned ? `${upgrade.name} · 已完成` : `${upgrade.name} · ${upgrade.cost} 木料`;
+    const effect = document.createElement('span');
+    effect.textContent = upgrade.effect;
+    button.append(heading, effect);
+    button.addEventListener('click', () => {
+      window.dispatchEvent(
+        new CustomEvent('chicken-life:buy-upgrade', { detail: { id: upgrade.id } }),
+      );
+    });
+    hud.upgradeChoices.append(button);
+  }
+}
+
+function setYardPanelOpen(open: boolean) {
+  if (open && (!latestSnapshot || latestSnapshot.requiresNaming || !hud.closeInteractionPanel.hidden)) {
+    return;
+  }
+  yardPanelOpen = open;
+  hud.yardPanel.hidden = !open;
+  window.dispatchEvent(new CustomEvent(open ? 'chicken-life:yard-panel-open' : 'chicken-life:yard-panel-close'));
+  if (open && latestSnapshot) {
+    renderYardPanel(latestSnapshot);
+    hud.yardPanelClose.focus();
+  } else {
+    appRoot.focus({ preventScroll: true });
   }
 }
 
@@ -243,6 +317,7 @@ hud.namingForm.addEventListener('submit', (event) => {
 });
 
 hud.debugClose.addEventListener('click', () => setDebugOpen(false));
+hud.yardPanelClose.addEventListener('click', () => setYardPanelOpen(false));
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-debug]')) {
   button.addEventListener('click', () => dispatchDebug(button.dataset.debug ?? ''));
 }
@@ -251,6 +326,22 @@ hud.forceEggButton.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', (event) => {
+  if (
+    event.key === 'Tab' &&
+    !yardPanelOpen &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.metaKey
+  ) {
+    event.preventDefault();
+    setYardPanelOpen(true);
+    return;
+  }
+  if (event.key === 'Escape' && yardPanelOpen) {
+    event.preventDefault();
+    setYardPanelOpen(false);
+    return;
+  }
   if (event.key === 'F1') {
     event.preventDefault();
     setDebugOpen(!debugOpen);

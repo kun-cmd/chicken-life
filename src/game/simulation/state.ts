@@ -17,6 +17,7 @@ import {
   isOnPath,
 } from '../content/yard';
 import { selectEggSpot } from '../content/eggSpots';
+import { YARD_LAMP_POSITION } from '../content/yardUpgrades';
 import {
   createChickenProfile,
   normalizeChickenName,
@@ -301,6 +302,7 @@ export interface HudSnapshot {
   stats: ChickenStats;
   upgrades: string[];
   eggArchive: EggArchiveEntry[];
+  yard: YardUpgradeState;
   daySummary: DaySummary | null;
   goalTip: string;
   forcedEggType: EggType | null;
@@ -1347,6 +1349,11 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     stats: { ...state.stats },
     upgrades: [...state.upgrades],
     eggArchive: state.eggArchive.map((entry) => ({ ...entry })),
+    yard: {
+      wood: state.yard.wood,
+      pendingWood: state.yard.pendingWood,
+      owned: [...state.yard.owned],
+    },
     daySummary: state.daySummary ? { ...state.daySummary, eaten: { ...state.daySummary.eaten } } : null,
     goalTip: goalTipFor(state),
     forcedEggType: state.forcedEggType,
@@ -1595,18 +1602,24 @@ export function isShadowy(point: Vec2) {
   return isInPlantPatch(point) || TREE_POSITIONS.some((tree) => distance(tree, point) < 98);
 }
 
-export function isNearLight(point: Vec2, lamp: number) {
+export function isNearLight(point: Vec2, lamp: number, yardLampActive = false) {
   const radius = lightRadiusFor(lamp);
-  return SAFE_LIGHTS.some((light) => distance(light, point) < radius);
+  return (
+    SAFE_LIGHTS.some((light) => distance(light, point) < radius) ||
+    (yardLampActive && distance(YARD_LAMP_POSITION, point) < radius)
+  );
 }
 
 function usableLightIndexFor(state: GameState, point: Vec2) {
   const radius = lightRadiusFor(state.stats.lamp);
+  const lights = state.yard.owned.includes('yard-lamp')
+    ? [...SAFE_LIGHTS, YARD_LAMP_POSITION]
+    : SAFE_LIGHTS;
   let bestIndex = -1;
   let bestDistance = Infinity;
-  for (let index = 0; index < SAFE_LIGHTS.length; index += 1) {
+  for (let index = 0; index < lights.length; index += 1) {
     if ((state.lightPressureUsed[index] ?? 0) >= LIGHT_PRESSURE_BUDGET) continue;
-    const lightDistance = distance(SAFE_LIGHTS[index], point);
+    const lightDistance = distance(lights[index], point);
     if (lightDistance < radius && lightDistance < bestDistance) {
       bestDistance = lightDistance;
       bestIndex = index;
