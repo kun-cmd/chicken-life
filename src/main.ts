@@ -350,6 +350,8 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'F3') dispatchDebug('addMaterials');
   if (event.key === 'F4') dispatchDebug('jumpDusk');
   if (event.key === 'F5') dispatchDebug('spawnWeasel');
+  if (event.key === 'F6') dispatchDebug('cycleWeather');
+  if (event.key === 'F7') dispatchDebug('unlockAbilities');
 });
 
 function setDebugOpen(open: boolean) {

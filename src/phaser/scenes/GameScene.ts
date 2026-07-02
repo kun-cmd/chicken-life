@@ -90,6 +90,7 @@ import {
   updateKeeper,
   updateKeeperRescue,
   updateWaterBoost,
+  updateWeatherExposure,
   updateMorningChickenWander,
   updateNightPressure,
   visibleFoods,
@@ -101,9 +102,13 @@ import { isForagingFood } from '../../game/systems/foraging';
 import { touchOptionsFor, type TouchOption } from '../../game/systems/closeInteraction';
 import { advanceEggSearch } from '../../game/systems/eggSearch';
 import {
+  FACILITY_IDLE_SECONDS,
+  advanceFacilityActivity,
   buyUpgrade,
   coopEntryRadius,
   doorCloseDurationMs,
+  ownedFacilityAt,
+  startFacilityActivity,
 } from '../../game/systems/yardUpgrades';
 
 type FoodView = Phaser.GameObjects.Image & { foodId: number };
@@ -114,6 +119,8 @@ type DebugAction =
   | { action: 'jumpDusk' }
   | { action: 'setLowAffection' }
   | { action: 'setHighAffection' }
+  | { action: 'cycleWeather' }
+  | { action: 'unlockAbilities' }
   | { action: 'spawnWeasel' }
   | { action: 'forceEgg'; eggType: EggType }
   | { action: 'clearSave' };
@@ -195,6 +202,8 @@ export class GameScene extends Phaser.Scene {
   private keeper!: Phaser.GameObjects.Image;
   private weasel!: Phaser.GameObjects.Image;
   private nightVeil!: Phaser.GameObjects.Graphics;
+  private weatherOverlay!: Phaser.GameObjects.Graphics;
+  private rainView!: Phaser.GameObjects.Graphics;
   private foodViews = new Map<number, FoodView>();
   private holeViews = new Map<number, Phaser.GameObjects.Image>();
   private animalViews = new Map<number, AnimalView>();
@@ -385,6 +394,22 @@ export class GameScene extends Phaser.Scene {
       this.state.affection = 90;
       this.state.message = '调试：切换到高亲密归巢预设。';
     }
+    if (detail.action === 'cycleWeather') {
+      const weather = ['sunny', 'cloudy', 'rain'] as const;
+      this.state.weather = weather[(weather.indexOf(this.state.weather) + 1) % weather.length];
+      this.state.offPathRainSeconds = 0;
+      this.state.muddyToday = false;
+      this.state.message = `调试：天气切换为${
+        this.state.weather === 'sunny' ? '晴天' : this.state.weather === 'cloudy' ? '阴天' : '雨天'
+      }。`;
+    }
+    if (detail.action === 'unlockAbilities') {
+      this.state.profile.awakenedAbilities.scratch = true;
+      this.state.profile.awakenedAbilities.sprint = true;
+      this.state.profile.awakenedAbilities.flutter = true;
+      this.state.activeAbilityTutorial = null;
+      this.state.message = '调试：刨土、冲刺和扑翅已经全部解锁。';
+    }
     if (detail.action === 'spawnWeasel') {
       if (this.state.mode === 'chicken') {
         this.spawnWeasel();
@@ -434,7 +459,9 @@ export class GameScene extends Phaser.Scene {
     this.human.setVisible(false);
     this.keeper = this.createKeeperSprite(this.state.keeper);
     this.weasel = this.createWeaselSprite(this.state.weasel);
+    this.weatherOverlay = this.add.graphics().setDepth(94);
     this.nightVeil = this.add.graphics().setDepth(95);
+    this.rainView = this.add.graphics().setDepth(97);
     this.createHomecomingViews();
     this.setupMusic();
     window.addEventListener('chicken-life:debug', this.handleDebugEvent);
@@ -463,6 +490,7 @@ export class GameScene extends Phaser.Scene {
       this.closeInteractionTimer?.remove(false);
     });
     this.applySceneViewFromState();
+    this.updateWeatherView(0);
     this.emitHud(true);
   }
 
@@ -470,12 +498,14 @@ export class GameScene extends Phaser.Scene {
     const dt = Math.min(deltaMs / 1000, 0.05);
     if (!this.state.profile.named) {
       this.updateSprites(dt);
+      this.updateWeatherView(time);
       return;
     }
 
     if (this.closeInteractionOpen || this.yardPanelOpen) {
       this.resetGameplayKeys();
       this.updateSprites(0);
+      this.updateWeatherView(time);
       this.updateMusic();
       return;
     }
@@ -487,6 +517,7 @@ export class GameScene extends Phaser.Scene {
         this.switchToHuman();
       }
       this.updateSprites(dt);
+      this.updateWeatherView(time);
       return;
     }
 
@@ -505,6 +536,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.updateSprites(dt);
+    this.updateWeatherView(time);
     this.updateNightVeil(time);
     this.updateMusic();
 
@@ -552,10 +584,25 @@ export class GameScene extends Phaser.Scene {
   private updateChicken(dt: number, actions: InputActions) {
     let actionSeconds = 0;
     this.updateMovingFoods(dt);
+    if (updateWeatherExposure(this.state, dt)) {
+      this.state.message = '雨水把泥地打湿了，鸡爪和腹羽都沾上了一点泥。';
+    }
     if (this.state.flow.phase === 'chicken-dusk') {
       const expired = expireHomeCall(this.duskCollection.homeCall, this.time.now / 1000);
       if (expired === 'reset') this.clearHouseResponseLight();
       this.updatePressure(dt * DUSK_PRESSURE_TIME_SCALE);
+    }
+    if (this.state.facilityLife.activity) {
+      const completed = advanceFacilityActivity(this.state.facilityLife, dt);
+      if (completed) {
+        this.state.message = completed.firstToday
+          ? '鸡舒舒服服地活动完，这段小院生活被记住了。'
+          : '鸡伸了伸翅膀，又精神起来。';
+        this.saveGame(true);
+      }
+      this.advanceChickenWorld(dt * 0.72);
+      this.updateRealtimeThreats(dt);
+      return;
     }
     if (this.state.body.fluttering) {
       this.advanceChickenWorld(dt * 0.35);
@@ -586,6 +633,11 @@ export class GameScene extends Phaser.Scene {
         actionSeconds += dt * (canSprint ? 1.25 : 0.78);
       }
       this.chicken.scaleX = direction.x < -0.05 ? -1 : direction.x > 0.05 ? 1 : this.chicken.scaleX;
+      this.state.facilityLife.idleSeconds = 0;
+      this.state.facilityLife.needsMovement = false;
+      if (ownedFacilityAt(this.state.yard, this.state.chicken) !== 'loose-soil') {
+        this.state.facilityLife.dustBathReady = false;
+      }
     }
     if (canSprint) {
       this.state.foraging.sprintEnergy = Math.max(0, this.state.foraging.sprintEnergy - 30 * dt);
@@ -602,6 +654,7 @@ export class GameScene extends Phaser.Scene {
 
     actionSeconds += this.handleChickenActions(dt, actions);
     if (this.state.flow.phase === 'dusk-human') return;
+    if (!this.state.facilityLife.activity) this.updateFacilityIdle(dt, hasMove);
 
     if (
       this.state.flow.phase === 'chicken-dusk' &&
@@ -621,6 +674,16 @@ export class GameScene extends Phaser.Scene {
 
   private handleChickenActions(dt: number, actions: InputActions) {
     let actionSeconds = 0;
+    const facility = ownedFacilityAt(this.state.yard, this.state.chicken);
+    if (
+      actions.interactPressed &&
+      facility === 'loose-soil' &&
+      this.state.facilityLife.dustBathReady &&
+      startFacilityActivity(this.state.facilityLife, 'dust-bath')
+    ) {
+      this.state.message = '鸡侧身钻进松土，开始扑腾着沙浴。';
+      return 0.6;
+    }
     const scratchTutorial = this.state.activeAbilityTutorial === 'scratch';
     const scratchPoint = tutorialForAbility('scratch')!.position;
     const atScratchTutorial = scratchTutorial && distance(this.state.chicken, scratchPoint) < 82;
@@ -640,6 +703,10 @@ export class GameScene extends Phaser.Scene {
         this.digCooldown = 2.2;
         this.playSfx(SFX_DIG_KEY, 0.54);
         this.cameras.main.shake(70, 0.002);
+        if (facility === 'loose-soil') {
+          this.state.facilityLife.dustBathReady = true;
+          this.state.message = '松土翻开了。松开再按 E，可以在这里沙浴。';
+        }
         if (atScratchTutorial && completeAbilityTutorial(this.state, 'scratch')) {
           this.playSfx(SFX_UPGRADE_KEY, 0.62);
           this.saveGame(true);
@@ -1266,7 +1333,11 @@ export class GameScene extends Phaser.Scene {
   private nearestFlutterTarget(radius: number) {
     let best: Vec2 | null = null;
     let bestDistance = radius;
-    for (const target of FLUTTER_TARGETS) {
+    const lowPerch = YARD_UPGRADES.find((upgrade) => upgrade.id === 'low-perch')!.position;
+    const targets = this.state.yard.owned.includes('low-perch')
+      ? [...FLUTTER_TARGETS, lowPerch]
+      : FLUTTER_TARGETS;
+    for (const target of targets) {
       const targetDistance = distance(target, this.state.chicken);
       if (targetDistance < bestDistance) {
         best = target;
@@ -1274,6 +1345,40 @@ export class GameScene extends Phaser.Scene {
       }
     }
     return best;
+  }
+
+  private updateFacilityIdle(dt: number, moving: boolean) {
+    const facility = ownedFacilityAt(this.state.yard, this.state.chicken);
+    if (moving || !facility || this.state.facilityLife.needsMovement) {
+      this.state.facilityLife.idleSeconds = 0;
+      return;
+    }
+
+    const activity =
+      facility === 'shade-shelter'
+        ? 'shade-rest'
+        : facility === 'low-perch' &&
+            distance(
+              this.state.chicken,
+              YARD_UPGRADES.find((upgrade) => upgrade.id === 'low-perch')!.position,
+            ) < 24
+          ? 'perch-idle'
+          : null;
+    if (!activity) {
+      this.state.facilityLife.idleSeconds = 0;
+      return;
+    }
+
+    this.state.facilityLife.idleSeconds += dt;
+    if (
+      this.state.facilityLife.idleSeconds >= FACILITY_IDLE_SECONDS &&
+      startFacilityActivity(this.state.facilityLife, activity)
+    ) {
+      this.state.message =
+        activity === 'shade-rest'
+          ? '鸡在棚下安静下来，开始打盹和梳理羽毛。'
+          : '鸡在低栖木上站稳，慢慢看看院子。';
+    }
   }
 
   private performFlutter(target: Vec2) {
@@ -2024,6 +2129,18 @@ export class GameScene extends Phaser.Scene {
     this.chicken.setPosition(this.state.chicken.x, this.state.chicken.y + lift - bob);
     this.chicken.setScale(facing * (1 + squash * 0.55), 1 - squash);
     this.chicken.rotation = stride * 0.055 * this.chickenWalkBlend * facing;
+    const facilityActivity = this.state.facilityLife.activity;
+    if (facilityActivity === 'dust-bath') {
+      this.chicken.rotation = Math.sin(this.time.now / 85) * 0.18;
+      this.chicken.setScale(facing * 1.06, 0.78);
+    } else if (facilityActivity === 'shade-rest') {
+      this.chicken.rotation = -0.08;
+      this.chicken.setScale(facing * 1.04, 0.84);
+    } else if (facilityActivity === 'perch-idle') {
+      const look = Math.sin(this.time.now / 520) >= 0 ? 1 : -1;
+      this.chicken.setScale(look, 1);
+      this.chicken.setPosition(this.state.chicken.x, this.state.chicken.y - 8);
+    }
     this.lastChickenPosition = { ...this.state.chicken };
     this.human.setPosition(this.state.human.x, this.state.human.y);
     const showEscortLantern =
@@ -2117,6 +2234,26 @@ export class GameScene extends Phaser.Scene {
         delay: i * 45,
         onComplete: () => seed.destroy(),
       });
+    }
+  }
+
+  private updateWeatherView(time: number) {
+    this.weatherOverlay.clear();
+    this.rainView.clear();
+    if (this.state.weather === 'sunny') return;
+
+    this.weatherOverlay.fillStyle(
+      this.state.weather === 'rain' ? 0x4c6470 : 0x52605d,
+      this.state.weather === 'rain' ? 0.16 : 0.09,
+    );
+    this.weatherOverlay.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    if (this.state.weather !== 'rain') return;
+
+    this.rainView.lineStyle(2, 0xb8d8df, 0.42);
+    for (let index = 0; index < 34; index += 1) {
+      const x = (index * 173 + time * 0.38) % WORLD_WIDTH;
+      const y = (index * 97 + time * 0.62) % WORLD_HEIGHT;
+      this.rainView.lineBetween(x, y, x - 9, y + 25);
     }
   }
 

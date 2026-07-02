@@ -12,6 +12,7 @@ import {
   WORLD_WIDTH,
   distance,
   isBlocked,
+  isInCoop,
   isInPlantPatch,
   isNearPond,
   isOnPath,
@@ -64,8 +65,18 @@ import {
 } from '../systems/eggSearch';
 import { createSeededRandom } from '../systems/seededRandom';
 import {
+  createWeatherCalendar,
+  isWeather,
+  weatherForDay,
+  type Weather,
+} from '../systems/weather';
+import {
+  createFacilityLifeState,
   createYardUpgradeState,
   deliverPendingWood,
+  ownedFacilityAt,
+  resetFacilityLifeDay,
+  type FacilityLifeState,
   type YardUpgradeState,
 } from '../systems/yardUpgrades';
 
@@ -218,6 +229,11 @@ export interface GameState {
   affection: number;
   coopSafety: number;
   yard: YardUpgradeState;
+  facilityLife: FacilityLifeState;
+  weatherCalendar: Weather[];
+  weather: Weather;
+  offPathRainSeconds: number;
+  muddyToday: boolean;
   abilityTrainingLevel: number;
   caughtToday: boolean;
   huggedToday: boolean;
@@ -332,6 +348,7 @@ const WORM_VISIBLE_MIN = 0.1;
 const WORM_VISIBLE_RANDOM = 0.06;
 const RESTOCK_DISTANCE_FROM_CHICKEN = 420;
 const RESTOCK_FOOD_COUNT = 3;
+const RAIN_MUD_SECONDS = 4;
 
 function createTutorialEgg(): EggEntity {
   return {
@@ -346,6 +363,7 @@ function createTutorialEgg(): EggEntity {
 
 export function createGameState(): GameState {
   const profile = createChickenProfile();
+  const weatherCalendar = createWeatherCalendar(profile.runSeed);
   const state: GameState = {
     profile,
     saveAvailable: true,
@@ -371,6 +389,11 @@ export function createGameState(): GameState {
     affection: 12,
     coopSafety: 0,
     yard: createYardUpgradeState(),
+    facilityLife: createFacilityLifeState(),
+    weatherCalendar,
+    weather: weatherCalendar[0],
+    offPathRainSeconds: 0,
+    muddyToday: false,
     abilityTrainingLevel: 0,
     caughtToday: false,
     huggedToday: false,
@@ -821,6 +844,21 @@ export function expireFoods(state: GameState) {
   return { expiredIds, spawnedFoods };
 }
 
+export function updateWeatherExposure(state: GameState, dt: number) {
+  if (
+    state.weather !== 'rain' ||
+    isOnPath(state.chicken) ||
+    isInCoop(state.chicken)
+  ) {
+    state.offPathRainSeconds = 0;
+    return false;
+  }
+  const wasMuddy = state.muddyToday;
+  state.offPathRainSeconds = Math.min(RAIN_MUD_SECONDS, state.offPathRainSeconds + Math.max(0, dt));
+  if (state.offPathRainSeconds >= RAIN_MUD_SECONDS) state.muddyToday = true;
+  return !wasMuddy && state.muddyToday;
+}
+
 export function restockEdibleFoods(state: GameState) {
   if (state.mode !== 'chicken') return [];
   const hasVisibleEdibleFood = visibleFoods(state).some(
@@ -1204,6 +1242,13 @@ export function advanceNightResult(state: GameState) {
   state.keeperRescueUsedToday = false;
   state.drankToday = false;
   state.holesDugToday = 0;
+  resetFacilityLifeDay(state.facilityLife);
+  state.weatherCalendar = createWeatherCalendar(
+    state.profile.runSeed ^ Math.imul(Math.floor((state.day - 1) / 14), 0x45d9f3b),
+  );
+  state.weather = weatherForDay(state.profile.runSeed, state.day);
+  state.offPathRainSeconds = 0;
+  state.muddyToday = false;
   state.lightPressureUsed = freshLightPressureUsed();
   state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 32 };
   state.human = { x: 750, y: 448 };
@@ -1383,6 +1428,13 @@ function goalTipFor(state: GameState) {
   if (tutorial) return tutorial.prompt;
   if (state.flow.phase === 'chicken-dusk') return `连续咯咯叫几声，让屋里听见${state.profile.name}想回窝。`;
   if (state.weasel.active) return '黄鼠狼来了：咯咯叫、冲刺躲开，等养鸡人赶来。';
+  const facility = ownedFacilityAt(state.yard, state.chicken);
+  if (state.facilityLife.activity === 'dust-bath') return '正在松土里沙浴。';
+  if (state.facilityLife.activity === 'shade-rest') return '正在遮阴棚下休息和梳理羽毛。';
+  if (state.facilityLife.activity === 'perch-idle') return '正在低栖木上站稳、看看院子。';
+  if (state.facilityLife.dustBathReady && facility === 'loose-soil') return '松开再按 E，在松土里沙浴。';
+  if (facility === 'shade-shelter') return '在遮阴棚里停下 2.5 秒，可以休息。';
+  if (facility === 'low-perch') return '靠近低栖木按 F 跳上去，停稳后会栖息。';
   const controls = ['空格啄食 / 咯咯叫'];
   if (state.profile.awakenedAbilities.scratch) controls.push('E 刨松土');
   if (state.profile.awakenedAbilities.sprint) controls.push('Shift 冲刺');
@@ -1409,6 +1461,10 @@ export function restoreGameState(saved: unknown): GameState {
       ...(input.profile?.awakenedAbilities ?? {}),
     },
   };
+  const defaultWeatherCalendar = createWeatherCalendar(
+    restoredProfile.runSeed ^
+      Math.imul(Math.floor((restoredFlow.day - 1) / 14), 0x45d9f3b),
+  );
   const restored: GameState = {
     ...fresh,
     ...input,
@@ -1463,6 +1519,23 @@ export function restoreGameState(saved: unknown): GameState {
       ...(input.yard ?? {}),
       owned: Array.isArray(input.yard?.owned) ? input.yard.owned : fresh.yard.owned,
     },
+    facilityLife: {
+      ...createFacilityLifeState(),
+      restedToday: input.facilityLife?.restedToday ?? false,
+    },
+    weatherCalendar:
+      Array.isArray(input.weatherCalendar) &&
+      input.weatherCalendar.length === 14 &&
+      input.weatherCalendar.every(isWeather)
+        ? input.weatherCalendar
+        : defaultWeatherCalendar,
+    weather: isWeather(input.weather)
+      ? input.weather
+      : weatherForDay(restoredProfile.runSeed, restoredFlow.day),
+    offPathRainSeconds: Number.isFinite(input.offPathRainSeconds)
+      ? Math.max(0, Math.min(RAIN_MUD_SECONDS, Number(input.offPathRainSeconds)))
+      : 0,
+    muddyToday: input.muddyToday ?? false,
     animals: Array.isArray(input.animals) ? input.animals : fresh.animals,
     weasel: { ...fresh.weasel, ...(input.weasel ?? {}) },
     upgrades: Array.isArray(input.upgrades) ? input.upgrades : fresh.upgrades,
