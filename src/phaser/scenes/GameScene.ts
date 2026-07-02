@@ -22,17 +22,22 @@ import {
 import { tutorialForAbility } from '../../game/content/abilityTutorials';
 import { canUseAbility } from '../../game/systems/abilities';
 import {
-  COOP_FEED_NOTICE_RANGE,
+  COOP_FINAL_SEED_RANGE,
   DUSK_PRESSURE_TIME_SCALE,
   HOME_CALL_HOLD_INTERVAL,
+  LURE_SEED_MOVE_SPEED,
+  advanceDuskCollection,
   canCloseCoopDoor,
   createDuskCollectionState,
-  escortBehaviorFor,
+  eatLureSeed,
   expireHomeCall,
+  findLureSeedTarget,
   markChickenInside,
   openCoopDoor,
-  placeCoopFeed,
+  placeLureSeed,
   registerHomeCluck,
+  visionRadiusFor,
+  type LureSeed,
 } from '../../game/systems/duskCollection';
 import {
   LEGACY_SAVE_KEY,
@@ -181,10 +186,11 @@ export class GameScene extends Phaser.Scene {
   private holeViews = new Map<number, Phaser.GameObjects.Image>();
   private animalViews = new Map<number, AnimalView>();
   private eggView: Phaser.GameObjects.Container | null = null;
-  private coopFeedView: Phaser.GameObjects.Image | null = null;
+  private duskSeedViews = new Map<number, Phaser.GameObjects.Image>();
   private coopDoorInterior!: Phaser.GameObjects.Rectangle;
   private coopDoorPanel!: Phaser.GameObjects.Rectangle;
   private humanLanternGlow!: Phaser.GameObjects.Arc;
+  private duskVisionRing!: Phaser.GameObjects.Arc;
   private houseResponseLight: Phaser.GameObjects.Arc | null = null;
   private lastHudAt = 0;
   private nightResultTimer = 0;
@@ -317,6 +323,7 @@ export class GameScene extends Phaser.Scene {
     if (detail.action === 'jumpDusk') {
       debugJumpToDusk(this.state);
       this.duskCollection = createDuskCollectionState();
+      this.clearDuskSeedViews();
       this.clearHouseResponseLight();
       this.syncCoopDoorView();
     }
@@ -877,20 +884,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateDuskCollection(dt: number, actions: InputActions, humanNearCoop: boolean) {
+    advanceDuskCollection(this.duskCollection, dt);
     if (this.duskCollection.phase !== 'inside') {
       this.updatePressure(dt * DUSK_PRESSURE_TIME_SCALE);
     }
 
+    if (actions.peckPressed) {
+      const seed = placeLureSeed(
+        this.duskCollection,
+        this.state.human,
+        distance(this.state.human, COOP_DOOR) <= COOP_FINAL_SEED_RANGE,
+      );
+      if (seed) {
+        this.createDuskSeedView(seed);
+        if (this.duskCollection.doorSeedPlaced && distance(seed, COOP_DOOR) <= COOP_FINAL_SEED_RANGE) {
+          this.state.message = '瓜子落在鸡舍门前。等鸡走近后，到门边按 E 开门。';
+        }
+      }
+    }
+
     if (actions.interactPressed) {
       if (!humanNearCoop) {
-        this.state.message = `先提灯陪${this.state.profile.name}走到鸡舍门边。`;
-      } else if (openCoopDoor(this.duskCollection)) {
-        this.syncCoopDoorView();
-        this.state.message = '鸡舍门打开了。再按 E，把最后一小撮料撒在门槛里。';
-      } else if (placeCoopFeed(this.duskCollection)) {
-        this.createCoopFeedView();
-        this.showHandFeedFx({ x: COOP_DOOR.x, y: COOP_DOOR.y + 8 });
-        this.state.message = `料就在门边，等${this.state.profile.name}自己跨进去。`;
+        this.state.message = '开关鸡舍门需要站在门边。';
       } else if (canCloseCoopDoor(this.duskCollection)) {
         applyFlowEvent(this.state, { type: 'close-door' });
         finishNightResult(this.state);
@@ -898,33 +913,46 @@ export class GameScene extends Phaser.Scene {
         this.syncCoopDoorView();
         this.emitHud(true, true);
         return;
-      } else if (this.duskCollection.phase === 'feed-placed') {
-        this.state.message = `${this.state.profile.name}还在走向门边，先等它进去。`;
+      } else if (this.duskCollection.phase === 'coop-open') {
+        this.state.message = `${this.state.profile.name}还在进窝，先等它跨过门槛。`;
+      } else if (!this.duskCollection.doorSeedPlaced) {
+        this.state.message = '先在鸡舍门前按空格撒一粒瓜子。';
+      } else if (openCoopDoor(this.duskCollection)) {
+        this.syncCoopDoorView();
+        this.state.message = `鸡舍门打开了，${this.state.profile.name}会自己进去。`;
       }
     }
 
-    const chickenCoopDistance = distance(this.state.chicken, COOP_DOOR);
-    if (
-      this.duskCollection.phase === 'feed-placed' &&
-      chickenCoopDistance <= COOP_FEED_NOTICE_RANGE
-    ) {
-      const towardFeed = normalize(
+    if (this.duskCollection.phase === 'inside' || this.duskCollection.eatPause > 0) return;
+
+    if (this.duskCollection.phase === 'coop-open') {
+      const towardDoor = normalize(
         COOP_DOOR.x - this.state.chicken.x,
         COOP_DOOR.y - this.state.chicken.y,
       );
-      this.tryMoveDuskChicken(towardFeed, 92, dt);
+      this.tryMoveDuskChicken(towardDoor, LURE_SEED_MOVE_SPEED, dt);
       if (distance(this.state.chicken, COOP_DOOR) < 30 && markChickenInside(this.duskCollection)) {
         applyFlowEvent(this.state, { type: 'chicken-entered-coop' });
-        this.coopFeedView?.destroy();
-        this.coopFeedView = null;
+        this.clearDuskSeedViews();
         this.chicken.setVisible(false);
         this.state.message = `${this.state.profile.name}跨过门槛进窝了。到门边按 E 关门。`;
       }
       return;
     }
 
-    if (this.duskCollection.phase !== 'inside') {
-      this.updateEscortChicken(dt);
+    const seed = findLureSeedTarget(
+      this.duskCollection,
+      this.state.chicken,
+      visionRadiusFor(this.state.affection),
+    );
+    if (!seed) return;
+
+    const towardSeed = normalize(seed.x - this.state.chicken.x, seed.y - this.state.chicken.y);
+    this.tryMoveDuskChicken(towardSeed, LURE_SEED_MOVE_SPEED, dt);
+    if (distance(this.state.chicken, seed) < 18 && eatLureSeed(this.duskCollection, seed.id)) {
+      this.duskSeedViews.get(seed.id)?.destroy();
+      this.duskSeedViews.delete(seed.id);
+      this.playSfx(SFX_PECK_KEY, 0.38);
     }
   }
 
@@ -939,37 +967,9 @@ export class GameScene extends Phaser.Scene {
     if (Math.abs(direction.x) > 0.05) this.state.chickenWander.facing = direction.x > 0 ? 1 : -1;
   }
 
-  private updateEscortChicken(dt: number) {
-    const behavior = escortBehaviorFor(this.state.affection);
-    const chickenDistance = distance(this.state.human, this.state.chicken);
-    const chickenCoopDistance = distance(this.state.chicken, COOP_DOOR);
-    if (chickenCoopDistance < 78 && this.duskCollection.phase === 'escorting') return;
-    if (chickenDistance >= behavior.followRange) return;
-
-    const humanCoopDistance = distance(this.state.human, COOP_DOOR);
-    const humanLeadingHome = humanCoopDistance + 26 < chickenCoopDistance;
-    if (chickenDistance <= behavior.preferredDistance && !humanLeadingHome) return;
-
-    const towardHuman = normalize(
-      this.state.human.x - this.state.chicken.x,
-      this.state.human.y - this.state.chicken.y,
-    );
-    const towardCoop = normalize(
-      COOP_DOOR.x - this.state.chicken.x,
-      COOP_DOOR.y - this.state.chicken.y,
-    );
-    const homeBias = humanLeadingHome ? behavior.homeBias : 0;
-    const direction = normalize(
-      towardHuman.x + towardCoop.x * homeBias,
-      towardHuman.y + towardCoop.y * homeBias,
-    );
-    this.tryMoveDuskChicken(direction, behavior.speed, dt);
-  }
-
   private switchToHuman() {
     this.duskCollection = createDuskCollectionState();
-    this.coopFeedView?.destroy();
-    this.coopFeedView = null;
+    this.clearDuskSeedViews();
     this.clearHouseResponseLight();
     this.chicken.setVisible(true);
     this.human.setVisible(true);
@@ -984,8 +984,7 @@ export class GameScene extends Phaser.Scene {
 
   private switchToChicken() {
     this.duskCollection = createDuskCollectionState();
-    this.coopFeedView?.destroy();
-    this.coopFeedView = null;
+    this.clearDuskSeedViews();
     this.clearHouseResponseLight();
     this.chicken.setVisible(true);
     this.human.setVisible(false);
@@ -1251,6 +1250,11 @@ export class GameScene extends Phaser.Scene {
       .circle(this.state.human.x, this.state.human.y, 118, 0xffdf8a, 0.13)
       .setDepth(96)
       .setVisible(false);
+    this.duskVisionRing = this.add
+      .circle(this.state.chicken.x, this.state.chicken.y, visionRadiusFor(this.state.affection), 0xffdf8a, 0.035)
+      .setStrokeStyle(2, 0xffdf8a, 0.3)
+      .setDepth(38)
+      .setVisible(false);
     this.syncCoopDoorView();
   }
 
@@ -1261,28 +1265,22 @@ export class GameScene extends Phaser.Scene {
     const open =
       storyPhase === 'chicken-day' ||
       (storyPhase === 'dusk-human' &&
-        (this.duskCollection.phase === 'coop-open' ||
-          this.duskCollection.phase === 'feed-placed' ||
-          this.duskCollection.phase === 'inside'));
+        (this.duskCollection.phase === 'coop-open' || this.duskCollection.phase === 'inside'));
     this.coopDoorInterior.setVisible(open);
     this.coopDoorPanel.setPosition(open ? doorCenter.x - 48 : doorCenter.x, doorCenter.y);
     this.coopDoorPanel.setFillStyle(open ? 0x6f422d : 0x8a5435, 1);
   }
 
-  private createCoopFeedView() {
-    this.coopFeedView?.destroy();
-    this.coopFeedView = this.add
-      .image(COOP_DOOR.x, COOP_DOOR.y + 8, 'food-grain')
-      .setDepth(48)
-      .setScale(1.15);
-    this.tweens.add({
-      targets: this.coopFeedView,
-      alpha: 0.58,
-      duration: 520,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
+  private createDuskSeedView(seed: LureSeed) {
+    this.duskSeedViews.set(
+      seed.id,
+      this.add.image(seed.x, seed.y, 'food-sunflower-0').setDepth(48).setScale(0.58),
+    );
+  }
+
+  private clearDuskSeedViews() {
+    for (const view of this.duskSeedViews.values()) view.destroy();
+    this.duskSeedViews.clear();
   }
 
   private showHouseResponseFx(stage: 'heard' | 'door-open') {
@@ -1845,6 +1843,10 @@ export class GameScene extends Phaser.Scene {
     this.humanLanternGlow
       ?.setVisible(showEscortLantern)
       .setPosition(this.state.human.x, this.state.human.y - 10);
+    this.duskVisionRing
+      ?.setVisible(showEscortLantern && this.duskCollection.phase !== 'inside')
+      .setPosition(this.state.chicken.x, this.state.chicken.y)
+      .setRadius(visionRadiusFor(this.state.affection));
     this.keeper.setPosition(this.state.keeper.x, this.state.keeper.y);
     this.keeper.setVisible(this.state.mode === 'chicken' && this.state.keeper.active);
     this.keeper.scaleX = this.state.keeper.facing;
