@@ -16,6 +16,7 @@ import {
   isNearPond,
   isOnPath,
 } from '../content/yard';
+import { selectEggSpot } from '../content/eggSpots';
 import {
   createChickenProfile,
   normalizeChickenName,
@@ -55,6 +56,17 @@ import {
   relationshipStage,
   type RelationshipState,
 } from '../systems/relationship';
+import {
+  collectCurrentEgg,
+  createEggSearchState,
+  type EggSearchState,
+} from '../systems/eggSearch';
+import { createSeededRandom } from '../systems/seededRandom';
+import {
+  createYardUpgradeState,
+  deliverPendingWood,
+  type YardUpgradeState,
+} from '../systems/yardUpgrades';
 
 export type Phase = 'day' | 'dusk' | 'night' | 'human';
 export type PlayerMode = 'chicken' | 'human';
@@ -204,7 +216,7 @@ export interface GameState {
   waterBoost: number;
   affection: number;
   coopSafety: number;
-  materials: number;
+  yard: YardUpgradeState;
   abilityTrainingLevel: number;
   caughtToday: boolean;
   huggedToday: boolean;
@@ -223,6 +235,8 @@ export interface GameState {
   foods: FoodEntity[];
   holes: HoleEntity[];
   egg: EggEntity | null;
+  eggSearch: EggSearchState;
+  previousEggSpotId: string | null;
   eggArchive: EggArchiveEntry[];
   animals: YardAnimal[];
   animalCooldown: number;
@@ -354,7 +368,7 @@ export function createGameState(): GameState {
     waterBoost: 0,
     affection: 12,
     coopSafety: 0,
-    materials: 0,
+    yard: createYardUpgradeState(),
     abilityTrainingLevel: 0,
     caughtToday: false,
     huggedToday: false,
@@ -403,6 +417,8 @@ export function createGameState(): GameState {
     foods: [],
     holes: [],
     egg: createTutorialEgg(),
+    eggSearch: createEggSearchState('coop-straw'),
+    previousEggSpotId: null,
     eggArchive: [],
     animals: [],
     animalCooldown: 5.8,
@@ -1031,16 +1047,16 @@ function repairNightPressure(state: GameState) {
     return false;
   }
 
-  if (state.materials <= 0) {
+  if (state.yard.wood <= 0) {
     state.message = '没有窝材了，今天只能先让鸡窝保持原样。';
     return false;
   }
 
   const cost = repairCostFor(state);
-  const spent = Math.min(state.materials, cost);
+  const spent = Math.min(state.yard.wood, cost);
   const repairedPressure = Math.min(state.nightPressure, spent * 4);
   state.repairedToday = true;
-  state.materials -= spent;
+  state.yard.wood -= spent;
   state.nightPressure = clamp(state.nightPressure - repairedPressure, 0, 100);
   state.affection = clamp(state.affection + 4, 0, 100);
   state.message =
@@ -1059,12 +1075,12 @@ export function improveCoopAbility(state: GameState) {
   }
 
   const cost = trainingCostFor(state);
-  if (state.materials < cost) {
-    state.message = `训练和改窝需要 ${cost} 份窝材，现在只有 ${state.materials} 份。`;
+  if (state.yard.wood < cost) {
+    state.message = `训练和改窝需要 ${cost} 份窝材，现在只有 ${state.yard.wood} 份。`;
     return false;
   }
 
-  state.materials -= cost;
+  state.yard.wood -= cost;
   const result = applyCoopTraining(state);
   state.abilityTrainingLevel += 1;
   state.affection = clamp(state.affection + 3, 0, 100);
@@ -1154,13 +1170,10 @@ export function finishChickenRun(state: GameState, caught: boolean) {
   state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 34 };
   state.chickenWander = { target: null, wait: 0.45, pause: 0.35, facing: 1 };
   state.reward = null;
-  state.message = caught ? '黄鼠狼扑过来了，鸡惊叫着逃回笼边。' : '鸡钻回笼里，咯咯咯地叫了起来。';
-  const gainedMaterials = materialGainForToday(state);
-  state.materials += gainedMaterials;
-  state.daySummary = createDaySummary(state, gainedMaterials);
+  state.daySummary = createDaySummary(state, 0);
   state.message = caught
-    ? `黄鼠狼扑了过来，鸡惊叫着逃回笼边。收下 ${gainedMaterials} 份窝材。`
-    : `鸡钻回笼里，咯咯地叫了起来。收下 ${gainedMaterials} 份窝材。`;
+    ? '黄鼠狼扑了过来，鸡惊叫着逃回笼边。明早先去找蛋。'
+    : '鸡钻回笼里，咯咯地叫了起来。明早先去找蛋。';
 }
 
 export function finishNightResult(state: GameState) {
@@ -1168,17 +1181,16 @@ export function finishNightResult(state: GameState) {
   state.carryingChicken = false;
   state.egg = createEgg(state);
   state.reward = null;
-  const gainedMaterials = materialGainForToday(state);
-  state.materials += gainedMaterials;
-  state.daySummary = createDaySummary(state, gainedMaterials);
+  state.daySummary = createDaySummary(state, 0);
   state.message = state.caughtToday
     ? '今晚受了惊，明早去看看留下了什么蛋。'
-    : `门关好了，顺手收下 ${gainedMaterials} 份修缮木料。明早再来找蛋。`;
+    : '门关好了。明早先找蛋，再看看昨天换回的木料。';
 }
 
 export function advanceNightResult(state: GameState) {
   const nextMorningEgg = state.egg;
   applyFlowEvent(state, { type: 'next-morning' });
+  const deliveredWood = deliverPendingWood(state.yard);
   state.nightPressure = 0;
   state.nutrition = 0;
   state.waterBoost = 0;
@@ -1221,25 +1233,32 @@ export function advanceNightResult(state: GameState) {
   state.weasel = { x: -120, y: 820, active: false, chasing: false, stunned: 0 };
   state.egg = nextMorningEgg;
   state.reward = null;
-  state.message = '清晨到了。先在院子里找到今天的蛋。';
+  state.message =
+    deliveredWood > 0
+      ? `清晨到了，昨天换回的 ${deliveredWood} 份木料已经送到。先去找今天的蛋。`
+      : '清晨到了。先在院子里找到今天的蛋。';
   spawnDailyFood(state);
 }
 
 export function collectEgg(state: GameState) {
-  if (!state.egg || state.egg.found) return;
+  if (!state.egg || state.egg.found || !collectCurrentEgg(state.eggSearch)) return false;
   state.egg.found = true;
   applyEggEffect(state, state.egg.type);
   rememberEgg(state, state.egg.type);
+  state.yard.pendingWood += 1;
+  state.previousEggSpotId = state.eggSearch.spotId;
   state.reward = {
     title: '找到鸡蛋',
     name: state.egg.name,
     effect: state.egg.effect,
   };
-  state.message = `${state.egg.name} 被捧起来了。可以再照料鸡；准备好后回房门口按 E 回屋。`;
+  state.message = `${state.egg.name} 被捧起来换了 1 份木料，明早送到。还可以再照料鸡；准备好后回房门口按 E 回屋。`;
+  return true;
 }
 
 export function startNextDay(state: GameState) {
   applyFlowEvent(state, { type: 'next-morning' });
+  deliverPendingWood(state.yard);
   state.nightPressure = 0;
   state.nutrition = 0;
   state.waterBoost = 0;
@@ -1301,7 +1320,7 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     clockDeg: state.time * 270 - 60,
     stamina: Math.round(state.foraging.sprintEnergy),
     staminaPct: Math.round((state.foraging.sprintEnergy / state.foraging.maxSprintEnergy) * 100),
-    wood: state.materials,
+    wood: state.yard.wood,
     showSprint: state.mode === 'chicken' && state.profile.awakenedAbilities.sprint,
     contextPrompt: goalTipFor(state),
     fullness: Math.round(state.stats.fullness),
@@ -1320,7 +1339,7 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     affection: Math.round(state.affection),
     affectionPct: Math.round(state.affection),
     coopSafety: state.coopSafety,
-    materials: state.materials,
+    materials: state.yard.wood,
     repairCost: repairCostFor(state),
     trainingCost: trainingCostFor(state),
     unlockedFoods: { ...state.unlockedFoods },
@@ -1348,7 +1367,7 @@ function goalTipFor(state: GameState) {
   const tutorial = tutorialForAbility(state.activeAbilityTutorial);
   if (state.mode === 'human') {
     if (state.flow.phase === 'dusk-human') {
-      return `提灯陪${state.profile.name}走到鸡舍；门边按 E 开门、撒料，鸡进去后再关门。`;
+      return `按空格撒瓜子引${state.profile.name}回鸡舍；门前撒一粒后按 E 开门，进去后再按 E 关门。`;
     }
     if (state.egg && !state.egg.found) return '按空格搜索；没找到时，看鸡朝哪个方向叫。';
     if (state.flow.morningEggFound) return '还可以靠近鸡按 E 抱一抱，或去鸡窝修缮；准备好后到房门口按 E 回屋。';
@@ -1425,7 +1444,18 @@ export function restoreGameState(saved: unknown): GameState {
     foods: Array.isArray(input.foods) ? input.foods.map((food) => restoreFood(food, fresh)) : fresh.foods,
     holes: Array.isArray(input.holes) ? input.holes : fresh.holes,
     egg: input.egg ?? (hasSavedFlow ? null : createTutorialEgg()),
+    eggSearch: {
+      ...fresh.eggSearch,
+      ...(input.eggSearch ?? {}),
+      found: input.egg?.found ?? input.eggSearch?.found ?? fresh.eggSearch.found,
+    },
+    previousEggSpotId: input.previousEggSpotId ?? null,
     eggArchive: Array.isArray(input.eggArchive) ? input.eggArchive : fresh.eggArchive,
+    yard: {
+      ...fresh.yard,
+      ...(input.yard ?? {}),
+      owned: Array.isArray(input.yard?.owned) ? input.yard.owned : fresh.yard.owned,
+    },
     animals: Array.isArray(input.animals) ? input.animals : fresh.animals,
     weasel: { ...fresh.weasel, ...(input.weasel ?? {}) },
     upgrades: Array.isArray(input.upgrades) ? input.upgrades : fresh.upgrades,
@@ -1441,6 +1471,22 @@ export function restoreGameState(saved: unknown): GameState {
   restored.nutrition = Number.isFinite(savedNutrition) ? clamp(savedNutrition, 0, FULLNESS_LIMIT) : restored.stats.fullness;
   const savedWaterBoost = Number((input as { waterBoost?: unknown }).waterBoost ?? 0);
   restored.waterBoost = Number.isFinite(savedWaterBoost) ? clamp(savedWaterBoost, 0, WATER_BOOST_LIMIT) : 0;
+  if (!input.yard) {
+    const legacyWood = Number((input as { materials?: unknown }).materials ?? 0);
+    restored.yard.wood = Number.isFinite(legacyWood) ? Math.max(0, Math.floor(legacyWood)) : 0;
+  }
+  if (input.egg && !input.eggSearch) {
+    const spot = selectEggSpot(
+      restored.day,
+      restored.previousEggSpotId,
+      createSeededRandom(restored.profile.runSeed + restored.day * 7919),
+    );
+    restored.egg = { ...input.egg, ...spot.position };
+    restored.eggSearch = {
+      ...createEggSearchState(spot.id),
+      found: input.egg.found,
+    };
+  }
   syncLegacyPhaseFromFlow(restored);
   return restored;
 }
@@ -1494,8 +1540,8 @@ export function debugAddAffection(state: GameState, amount = 20) {
 }
 
 export function debugAddMaterials(state: GameState, amount = 30) {
-  state.materials += amount;
-  state.message = `调试：窝材 +${amount}，现在 ${state.materials}。`;
+  state.yard.wood += amount;
+  state.message = `调试：木料 +${amount}，现在 ${state.yard.wood}。`;
 }
 
 export function debugJumpToDusk(state: GameState) {
@@ -1809,9 +1855,15 @@ function createEgg(state: GameState): EggEntity {
   const type = state.forcedEggType ?? pickEggType(state);
   state.forcedEggType = null;
   const eggInfo = eggCatalog[type];
-  const position = pickEggSpot(state);
+  const eggDay = state.day + 1;
+  const spot = selectEggSpot(
+    eggDay,
+    state.previousEggSpotId,
+    createSeededRandom(state.profile.runSeed + eggDay * 7919),
+  );
+  state.eggSearch = createEggSearchState(spot.id);
   return {
-    ...position,
+    ...spot.position,
     type,
     found: false,
     name: eggInfo.name,
@@ -1841,7 +1893,7 @@ function createDaySummary(state: GameState, gainedMaterials: number): DaySummary
     day: state.day,
     eaten: { ...state.eaten },
     gainedMaterials,
-    materialsTotal: state.materials,
+    materialsTotal: state.yard.wood,
     eggType,
     eggName: egg?.name ?? eggInfo.name,
     eggReason: eggReasonFor(state, eggType, metrics),
@@ -1981,26 +2033,6 @@ function formatRequirementGap(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-function pickEggSpot(state: GameState): Vec2 {
-  const anchors = [
-    ...TREE_POSITIONS,
-    ...state.holes,
-    ...PLANT_PATCHES.map((patch) => ({
-      x: patch.x + patch.width * 0.5,
-      y: patch.y + patch.height * 0.5,
-    })),
-  ];
-  const anchor = anchors[Math.floor(Math.random() * anchors.length)] ?? { x: HOUSE.x + 80, y: HOUSE.y + 280 };
-  for (let i = 0; i < 20; i += 1) {
-    const point = {
-      x: clamp(anchor.x + PhaserLikeRandom(-76, 76), 58, WORLD_WIDTH - 58),
-      y: clamp(anchor.y + PhaserLikeRandom(-58, 58), 58, WORLD_HEIGHT - 58),
-    };
-    if (!isBlocked(point, 22)) return point;
-  }
-  return { x: 760, y: 530 };
-}
-
 function applyEggEffect(state: GameState, type: EggType) {
   const info = eggCatalog[type];
   if (type === 'fullBelly') state.stats.maxStamina += 10;
@@ -2046,11 +2078,6 @@ function rememberEgg(state: GameState, type: EggType) {
     upgrade: info.upgrade,
     count: 1,
   });
-}
-
-function materialGainForToday(state: GameState) {
-  const discoveries = new Set(state.foraging.foodsEatenToday).size;
-  return Math.max(2, Math.min(8, 2 + discoveries + Math.floor(state.foraging.foodsEatenToday.length / 3)));
 }
 
 function repairCostFor(state: GameState) {
