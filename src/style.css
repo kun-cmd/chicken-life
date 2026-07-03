@@ -1066,7 +1066,7 @@ body[data-mode='human'] .today-plate {
   gap: 8px;
 }
 
-.debug-egg,
+.debug-day,
 .debug-volume {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -1076,7 +1076,7 @@ body[data-mode='human'] .today-plate {
   font-size: 12px;
 }
 
-.debug-egg select,
+.debug-day input,
 .debug-volume input {
   min-width: 0;
   height: 30px;
@@ -1227,6 +1227,16 @@ body[data-phase='night'] #game {
   .stat-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.debug-day button {
+  height: 30px;
+  padding: 0 12px;
+  color: #231f17;
+  font-weight: 800;
+  background: #e2bd70;
+  border: 0;
+  border-radius: 8px;
 }
 
 @media (prefers-reduced-motion: reduce) {

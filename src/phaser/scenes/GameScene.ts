@@ -67,6 +67,7 @@ import {
   currentRelationshipStage,
   debugAddMaterials,
   debugJumpToDusk,
+  debugSetDay,
   digHole,
   drinkAtPond,
   expireFoods,
@@ -90,7 +91,7 @@ import {
   updateKeeper,
   updateWaterBoost,
   updateWeatherExposure,
-  updateMorningChickenWander,
+  updateIdleChickenWander,
   visibleFoods,
 } from '../../game/simulation/state';
 import type { FoodEntity, HoleEntity, Vec2, YardAnimal } from '../../game/simulation/state';
@@ -120,6 +121,8 @@ type AnimalView = Phaser.GameObjects.Image & { animalId: number; animalType: Yar
 type DebugAction =
   | { action: 'addMaterials' }
   | { action: 'jumpDusk' }
+  | { action: 'setDay'; day: number }
+  | { action: 'skipPhase' }
   | { action: 'spawnWeasel' }
   | { action: 'clearSave' };
 
@@ -402,6 +405,21 @@ export class GameScene extends Phaser.Scene {
     const detail = (event as CustomEvent<DebugAction>).detail;
     if (!detail) return;
 
+    if (detail.action === 'setDay') {
+      debugSetDay(this.state, detail.day);
+      this.duskCollection = createDuskCollectionState();
+      this.coopDoorClosing = false;
+      this.clearDuskSeedViews();
+      this.clearHouseResponseLight();
+      this.resetGameplayKeys();
+      this.rebuildWorldFromState();
+      this.emitHud(true, true);
+      return;
+    }
+    if (detail.action === 'skipPhase') {
+      this.skipDebugPhase();
+      return;
+    }
     if (detail.action === 'addMaterials') debugAddMaterials(this.state);
     if (detail.action === 'jumpDusk') {
       debugJumpToDusk(this.state);
@@ -436,6 +454,69 @@ export class GameScene extends Phaser.Scene {
     this.emitHud(true);
     this.saveGame(true);
   };
+
+  private skipDebugPhase() {
+    const phase = this.state.flow.phase;
+    if (phase === 'morning-human') {
+      if (this.state.egg && !this.state.egg.found) collectEgg(this.state);
+      if (!this.state.flow.morningEggFound) applyFlowEvent(this.state, { type: 'egg-found' });
+      applyFlowEvent(this.state, { type: 'return-home' });
+      this.state.message = '调试：已跳过清晨，进入鸡的白天。';
+      this.switchToChicken();
+      return;
+    }
+    if (phase === 'chicken-day') {
+      debugJumpToDusk(this.state);
+      this.duskCollection = createDuskCollectionState();
+      this.clearDuskSeedViews();
+      this.clearHouseResponseLight();
+      this.syncCoopDoorView();
+      this.emitHud(true, true);
+      return;
+    }
+    if (phase === 'chicken-dusk') {
+      this.state.human = {
+        x: HOUSE.x + HOUSE.width * 0.5,
+        y: HOUSE.y + HOUSE.height + 58,
+      };
+      applyFlowEvent(this.state, { type: 'call-human' });
+      this.state.message = '调试：已跳过黄昏呼叫，进入赶鸡阶段。';
+      this.switchToHuman();
+      return;
+    }
+    if (phase === 'dusk-human') {
+      if (!this.state.flow.chickenInCoop) {
+        applyFlowEvent(this.state, { type: 'chicken-entered-coop' });
+      }
+      this.duskCollection.phase = 'inside';
+      if (this.state.weaselEncounter) resolveWeaselOutcome(this.state, 'safe');
+      applyFlowEvent(this.state, { type: 'close-door' });
+      finishNightResult(this.state);
+      this.nightResultTimer = 0.2;
+      this.chicken.setVisible(false);
+      this.clearDuskSeedViews();
+      this.syncCoopDoorView();
+      this.state.message = '调试：已跳过赶鸡，进入夜间结算。';
+      this.emitHud(true, true);
+      return;
+    }
+    if (phase === 'night-result') {
+      advanceNightResult(this.state);
+      this.state.message = '调试：已跳过夜间结算。';
+      this.switchToHuman();
+      return;
+    }
+    if (phase === 'epilogue-human') {
+      collectKeepsakeEgg(this.state);
+      this.clearEggClueView();
+      this.emitHud(true, true);
+      return;
+    }
+    if (phase === 'ending' && continueFreePlay(this.state)) {
+      this.rebuildWorldFromState();
+      this.emitHud(true, true);
+    }
+  }
 
   private handleVolumeEvent = (event: Event) => {
     const volume = Number((event as CustomEvent<{ volume?: number }>).detail?.volume);
@@ -960,7 +1041,7 @@ export class GameScene extends Phaser.Scene {
     if (this.state.egg && !this.state.egg.found) {
       this.state.eggSearch = advanceEggSearch(this.state.eggSearch, dt);
     }
-    updateMorningChickenWander(this.state, dt);
+    updateIdleChickenWander(this.state, dt);
     this.updateEggGuidance(dt);
 
     if (actions.interactPressed && nearHouseDoor) {
@@ -1091,8 +1172,13 @@ export class GameScene extends Phaser.Scene {
       this.state.chicken,
       visionRadiusFor(this.state.affection),
     );
-    if (!seed) return;
+    if (!seed) {
+      updateIdleChickenWander(this.state, dt, false);
+      return;
+    }
 
+    this.state.chickenWander.target = null;
+    this.state.chickenWander.wait = 0.35;
     const towardSeed = normalize(seed.x - this.state.chicken.x, seed.y - this.state.chicken.y);
     this.tryMoveDuskChicken(towardSeed, LURE_SEED_MOVE_SPEED, dt);
     if (distance(this.state.chicken, seed) < 18 && eatLureSeed(this.duskCollection, seed.id)) {
@@ -1146,6 +1232,9 @@ export class GameScene extends Phaser.Scene {
     this.eggClueSoundCooldown = 0;
     this.eggDirectionTimer = 0;
     this.state.handLanternActive = false;
+    this.state.chickenWander.target = null;
+    this.state.chickenWander.wait = 0.4;
+    this.state.chickenWander.pause = 0.2;
     this.clearDuskSeedViews();
     this.clearHouseResponseLight();
     this.chicken.setVisible(true);

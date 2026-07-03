@@ -155,9 +155,15 @@
           <div class="debug-actions">
             <button type="button" data-debug="addMaterials">补充木料</button>
             <button type="button" data-debug="jumpDusk">跳黄昏</button>
+            <button type="button" data-debug="skipPhase">跳过此阶段</button>
             <button type="button" data-debug="spawnWeasel">生成黄鼠狼</button>
             <button type="button" data-debug="clearSave">清空存档</button>
           </div>
+          <label class="debug-day">
+            <span>调整天数</span>
+            <input id="debugDay" type="number" min="1" max="999" step="1" value="1" />
+            <button id="debugSetDay" type="button">设置</button>
+          </label>
           <label class="debug-volume">
             <span>总音量</span>
             <input id="masterVolume" type="range" min="0" max="100" step="1" value="70" />

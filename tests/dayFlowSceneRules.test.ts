@@ -5,6 +5,7 @@ import {
   applyFlowEvent,
   createGameState,
   debugJumpToDusk,
+  debugSetDay,
   finishNightResult,
 } from '../src/game/simulation/state';
 
@@ -46,4 +47,19 @@ test('debug dusk jump advances the authoritative flow', () => {
   applyFlowEvent(state, { type: 'return-home' });
   assert.equal(debugJumpToDusk(state), true);
   assert.equal(state.flow.phase, 'chicken-dusk');
+});
+
+test('debug day adjustment starts the selected morning with matching story gates', () => {
+  const state = createGameState();
+  assert.equal(debugSetDay(state, 14), 14);
+  assert.equal(state.day, 14);
+  assert.equal(state.flow.day, 14);
+  assert.equal(state.flow.phase, 'morning-human');
+  assert.equal(state.mode, 'human');
+  assert.equal(state.egg?.found, false);
+  assert.equal(state.profile.awakenedAbilities.scratch, true);
+  assert.equal(state.profile.awakenedAbilities.sprint, true);
+  assert.equal(state.profile.awakenedAbilities.flutter, true);
+  assert.equal(state.endingSeen, false);
+  assert.equal(state.freePlay, false);
 });

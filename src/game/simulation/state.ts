@@ -1170,11 +1170,15 @@ export function improveCoopAbility(state: GameState) {
   return true;
 }
 
-export function updateMorningChickenWander(state: GameState, dt: number) {
+export function updateIdleChickenWander(
+  state: GameState,
+  dt: number,
+  keepDistanceFromHuman = true,
+) {
   if (state.mode !== 'human') return;
 
   const nearHuman = distance(state.human, state.chicken) < 92;
-  if (nearHuman) {
+  if (keepDistanceFromHuman && nearHuman) {
     state.chickenWander.target = null;
     state.chickenWander.wait = Math.max(state.chickenWander.wait, 0.35);
     return;
@@ -1191,7 +1195,7 @@ export function updateMorningChickenWander(state: GameState, dt: number) {
   }
 
   if (!state.chickenWander.target || distance(state.chicken, state.chickenWander.target) < 12) {
-    state.chickenWander.target = pickMorningChickenTarget(state);
+    state.chickenWander.target = pickChickenWanderTarget(state, keepDistanceFromHuman);
     state.chickenWander.wait = 0.35 + Math.random() * 1.1;
     return;
   }
@@ -1841,6 +1845,29 @@ export function debugAddMaterials(state: GameState, amount = 30) {
   state.message = `调试：木料 +${amount}，现在 ${state.yard.wood}。`;
 }
 
+export function debugSetDay(state: GameState, requestedDay: number) {
+  const day = clamp(
+    Number.isFinite(requestedDay) ? Math.floor(requestedDay) : state.day,
+    1,
+    999,
+  );
+  state.flow = createDayFlow({ day });
+  syncLegacyPhaseFromFlow(state);
+  state.freePlay = day > 14;
+  state.endingSeen = day > 14;
+  state.finaleCheckpointJson = null;
+  state.stormActive = false;
+  if (day >= 4) state.profile.awakenedAbilities.scratch = true;
+  if (day >= 5) state.profile.awakenedAbilities.sprint = true;
+  if (day >= 7) state.profile.awakenedAbilities.flutter = true;
+
+  const egg = createMorningEggForDay(state, day, 'balanced');
+  resetMorningState(state, egg);
+  state.daySummary = null;
+  state.message = `调试：已切换到第 ${day} 天清晨。`;
+  return day;
+}
+
 export function debugJumpToDusk(state: GameState) {
   if (state.flow.phase !== 'chicken-day' && state.flow.phase !== 'chicken-dusk') {
     state.message = '调试：只有母鸡行动时才能跳到黄昏。';
@@ -2125,7 +2152,10 @@ function randomYardPoint(): Vec2 {
   };
 }
 
-function pickMorningChickenTarget(state: GameState): Vec2 | null {
+function pickChickenWanderTarget(
+  state: GameState,
+  keepDistanceFromHuman: boolean,
+): Vec2 | null {
   for (let i = 0; i < 32; i += 1) {
     const angle = Math.random() * Math.PI * 2;
     const radius = 70 + Math.random() * 180;
@@ -2134,13 +2164,18 @@ function pickMorningChickenTarget(state: GameState): Vec2 | null {
       y: clamp(state.chicken.y + Math.sin(angle) * radius, 58, WORLD_HEIGHT - 58),
     };
     if (isBlocked(point, 18)) continue;
-    if (distance(point, state.human) < 110) continue;
+    if (keepDistanceFromHuman && distance(point, state.human) < 110) continue;
     return point;
   }
 
   for (let i = 0; i < 24; i += 1) {
     const point = randomYardPoint();
-    if (!isBlocked(point, 18) && distance(point, state.human) >= 110) return point;
+    if (
+      !isBlocked(point, 18) &&
+      (!keepDistanceFromHuman || distance(point, state.human) >= 110)
+    ) {
+      return point;
+    }
   }
 
   return null;
@@ -2157,8 +2192,15 @@ function randomPlantPoint(): Vec2 {
 function createEgg(state: GameState): EggEntity {
   const type = state.forcedEggType ?? pickEggType(state);
   state.forcedEggType = null;
+  return createMorningEggForDay(state, state.day + 1, type);
+}
+
+function createMorningEggForDay(
+  state: GameState,
+  eggDay: number,
+  type: EggType,
+): EggEntity {
   const eggInfo = eggCatalog[type];
-  const eggDay = state.day + 1;
   const spot = selectEggSpot(
     eggDay,
     state.previousEggSpotId,

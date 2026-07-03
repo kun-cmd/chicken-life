@@ -83,6 +83,8 @@ const hud = {
   rewardEffect: document.querySelector<HTMLElement>('#rewardEffect')!,
   debugPanel: document.querySelector<HTMLElement>('#debugPanel')!,
   debugClose: document.querySelector<HTMLButtonElement>('#debugClose')!,
+  debugDay: document.querySelector<HTMLInputElement>('#debugDay')!,
+  debugSetDay: document.querySelector<HTMLButtonElement>('#debugSetDay')!,
   masterVolume: document.querySelector<HTMLInputElement>('#masterVolume')!,
   masterVolumeLabel: document.querySelector<HTMLElement>('#masterVolumeLabel')!,
 };
@@ -383,6 +385,9 @@ hud.yardPanelClose.addEventListener('click', () => setYardPanelOpen(false));
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-debug]')) {
   button.addEventListener('click', () => dispatchDebug(button.dataset.debug ?? ''));
 }
+hud.debugSetDay.addEventListener('click', () => {
+  dispatchDebug('setDay', { day: Number(hud.debugDay.value) });
+});
 
 window.addEventListener('keydown', (event) => {
   if (
@@ -413,10 +418,13 @@ window.addEventListener('keydown', (event) => {
 function setDebugOpen(open: boolean) {
   debugOpen = open;
   hud.debugPanel.hidden = !open;
+  if (open && latestSnapshot) hud.debugDay.value = String(latestSnapshot.day);
 }
 
-function dispatchDebug(action: string) {
-  window.dispatchEvent(new CustomEvent('chicken-life:debug', { detail: { action } }));
+function dispatchDebug(action: string, detail: Record<string, unknown> = {}) {
+  window.dispatchEvent(
+    new CustomEvent('chicken-life:debug', { detail: { action, ...detail } }),
+  );
 }
 
 function setupVolumeControl() {
