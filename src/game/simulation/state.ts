@@ -79,6 +79,11 @@ import {
   type FacilityLifeState,
   type YardUpgradeState,
 } from '../systems/yardUpgrades';
+import {
+  type WeaselEncounterState,
+  type WeaselOutcome,
+} from '../systems/weaselEncounter';
+import { createWeaselSchedule } from '../systems/weaselSchedule';
 
 export type Phase = 'day' | 'dusk' | 'night' | 'human';
 export type PlayerMode = 'chicken' | 'human';
@@ -260,6 +265,10 @@ export interface GameState {
   catVisitedToday: boolean;
   catWillVisitToday: boolean;
   weasel: WeaselState;
+  weaselSchedule: number[];
+  weaselEncounter: WeaselEncounterState | null;
+  weaselEncounterDoneToday: boolean;
+  handLanternActive: boolean;
   upgrades: string[];
   daySummary: DaySummary | null;
   forcedEggType: EggType | null;
@@ -456,6 +465,10 @@ export function createGameState(): GameState {
       chasing: false,
       stunned: 0,
     },
+    weaselSchedule: createWeaselSchedule(profile.runSeed),
+    weaselEncounter: null,
+    weaselEncounterDoneToday: false,
+    handLanternActive: false,
     upgrades: [],
     daySummary: null,
     forcedEggType: null,
@@ -1227,6 +1240,17 @@ export function finishNightResult(state: GameState) {
     : '门关好了。明早先找蛋，再看看昨天换回的木料。';
 }
 
+export function resolveWeaselOutcome(state: GameState, outcome: WeaselOutcome) {
+  if (outcome === 'active') return;
+  if (outcome === 'caught') state.caughtToday = true;
+  if (outcome === 'repelled') {
+    recordTrustMemory(state.relationship, state.day, 'first-rescue');
+  }
+  state.weaselEncounter = null;
+  state.weaselEncounterDoneToday = true;
+  state.handLanternActive = false;
+}
+
 export function advanceNightResult(state: GameState) {
   const nextMorningEgg = state.egg;
   applyFlowEvent(state, { type: 'next-morning' });
@@ -1240,6 +1264,9 @@ export function advanceNightResult(state: GameState) {
   state.carryingChicken = false;
   state.repairedToday = false;
   state.keeperRescueUsedToday = false;
+  state.weaselEncounter = null;
+  state.weaselEncounterDoneToday = false;
+  state.handLanternActive = false;
   state.drankToday = false;
   state.holesDugToday = 0;
   resetFacilityLifeDay(state.facilityLife);
@@ -1419,12 +1446,16 @@ function goalTipFor(state: GameState) {
   const tutorial = tutorialForAbility(state.activeAbilityTutorial);
   if (state.mode === 'human') {
     if (state.flow.phase === 'dusk-human') {
+      if (state.weaselEncounter) {
+        return `空格撒瓜子继续引${state.profile.name}回窝；按住 F 用提灯照退黄鼠狼。`;
+      }
       return `按空格撒瓜子引${state.profile.name}回鸡舍；门前撒一粒后按 E 开门，进去后再按 E 关门。`;
     }
     if (state.egg && !state.egg.found) return '按空格搜索；没找到时，看鸡朝哪个方向叫。';
     if (state.flow.morningEggFound) return '还可以靠近鸡按 E 抱一抱，或去鸡窝修缮；准备好后到房门口按 E 回屋。';
     return '靠近鸡按 E 互动。';
   }
+  if (state.weaselEncounter) return '黄鼠狼靠近了：冲刺、跳上低处，或连续叫养鸡人出来。';
   if (tutorial) return tutorial.prompt;
   if (state.flow.phase === 'chicken-dusk') return `连续咯咯叫几声，让屋里听见${state.profile.name}想回窝。`;
   if (state.weasel.active) return '黄鼠狼来了：咯咯叫、冲刺躲开，等养鸡人赶来。';
@@ -1538,6 +1569,20 @@ export function restoreGameState(saved: unknown): GameState {
     muddyToday: input.muddyToday ?? false,
     animals: Array.isArray(input.animals) ? input.animals : fresh.animals,
     weasel: { ...fresh.weasel, ...(input.weasel ?? {}) },
+    weaselSchedule: Array.isArray(input.weaselSchedule)
+      ? input.weaselSchedule
+      : createWeaselSchedule(restoredProfile.runSeed),
+    weaselEncounter:
+      input.weaselEncounter &&
+      typeof input.weaselEncounter === 'object' &&
+      input.weaselEncounter.position
+        ? {
+            ...input.weaselEncounter,
+            position: { ...input.weaselEncounter.position },
+          }
+        : null,
+    weaselEncounterDoneToday: input.weaselEncounterDoneToday ?? false,
+    handLanternActive: false,
     upgrades: Array.isArray(input.upgrades) ? input.upgrades : fresh.upgrades,
     daySummary: restoreDaySummary(input.daySummary),
     forcedEggType: isEggType(input.forcedEggType) ? input.forcedEggType : null,

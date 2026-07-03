@@ -7,6 +7,7 @@ export interface WeaselEncounterState {
   position: Vec2;
   phase: WeaselPhase;
   lightExposure: number;
+  warningSeconds: number;
 }
 
 export interface WeaselContext {
@@ -19,8 +20,13 @@ export interface WeaselContext {
   speedScale?: number;
 }
 
-export function createWeaselEncounter(position: Vec2): WeaselEncounterState {
-  return { position: { ...position }, phase: 'stalking', lightExposure: 0 };
+export function createWeaselEncounter(position: Vec2, warningSeconds = 0): WeaselEncounterState {
+  return {
+    position: { ...position },
+    phase: 'stalking',
+    lightExposure: 0,
+    warningSeconds: Math.max(0, warningSeconds),
+  };
 }
 
 export function updateWeaselEncounter(
@@ -33,6 +39,12 @@ export function updateWeaselEncounter(
   }
 
   const dt = Math.max(0, context.dt);
+  if (state.warningSeconds > 0) {
+    return {
+      state: { ...state, warningSeconds: Math.max(0, state.warningSeconds - dt) },
+      outcome: 'active',
+    };
+  }
   const lightExposure = context.illuminated
     ? state.lightExposure + dt
     : Math.max(0, state.lightExposure - dt * 0.5);
@@ -61,7 +73,7 @@ export function updateWeaselEncounter(
     y: state.position.y + (dy / length) * speed * dt,
   };
   return {
-    state: { position, phase, lightExposure },
+    state: { position, phase, lightExposure, warningSeconds: 0 },
     outcome: 'active',
   };
 }
