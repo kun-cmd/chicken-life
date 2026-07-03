@@ -84,6 +84,11 @@ import {
   type WeaselOutcome,
 } from '../systems/weaselEncounter';
 import { createWeaselSchedule } from '../systems/weaselSchedule';
+import {
+  captureFinaleCheckpoint,
+  restoreFinaleCheckpoint,
+  shouldStartFinale,
+} from '../systems/finale';
 
 export type Phase = 'day' | 'dusk' | 'night' | 'human';
 export type PlayerMode = 'chicken' | 'human';
@@ -269,6 +274,10 @@ export interface GameState {
   weaselEncounter: WeaselEncounterState | null;
   weaselEncounterDoneToday: boolean;
   handLanternActive: boolean;
+  endingSeen: boolean;
+  freePlay: boolean;
+  finaleCheckpointJson: string | null;
+  stormActive: boolean;
   upgrades: string[];
   daySummary: DaySummary | null;
   forcedEggType: EggType | null;
@@ -332,6 +341,7 @@ export interface HudSnapshot {
   goalTip: string;
   forcedEggType: EggType | null;
   keeperLabel: string;
+  endingMemories: string[];
   toast: string;
   reward: { title: string; name: string; effect: string } | null;
 }
@@ -468,6 +478,10 @@ export function createGameState(): GameState {
     weaselEncounter: null,
     weaselEncounterDoneToday: false,
     handLanternActive: false,
+    endingSeen: false,
+    freePlay: false,
+    finaleCheckpointJson: null,
+    stormActive: false,
     upgrades: [],
     daySummary: null,
     forcedEggType: null,
@@ -490,7 +504,21 @@ export function applyFlowEvent(state: GameState, event: DayFlowEvent) {
   const previousPhase = state.flow.phase;
   state.flow = reduceDayFlow(state.flow, event);
   syncLegacyPhaseFromFlow(state);
-  if (previousPhase !== 'chicken-day' && state.flow.phase === 'chicken-day') {
+  if (
+    previousPhase !== 'chicken-dusk' &&
+    state.flow.phase === 'chicken-dusk' &&
+    shouldStartFinale(state.day, state.endingSeen) &&
+    !state.finaleCheckpointJson
+  ) {
+    state.stormActive = true;
+    state.finaleCheckpointJson = captureFinaleCheckpoint(state);
+    state.message = '暴风压进小院。今晚若没能安全关门，会从这一刻重新来过。';
+  }
+  if (
+    !state.freePlay &&
+    previousPhase !== 'chicken-day' &&
+    state.flow.phase === 'chicken-day'
+  ) {
     state.activeAbilityTutorial =
       tutorialForDay(state.day, state.profile.awakenedAbilities)?.ability ?? null;
     if (state.activeAbilityTutorial) {
@@ -565,7 +593,9 @@ function syncLegacyPhaseFromFlow(state: GameState) {
   const actor = activeActor(state.flow.phase);
   state.mode = actor === 'none' ? state.mode : actor;
   state.phase =
-    state.flow.phase === 'morning-human' || state.flow.phase === 'dusk-human'
+    state.flow.phase === 'morning-human' ||
+    state.flow.phase === 'dusk-human' ||
+    state.flow.phase === 'epilogue-human'
       ? 'human'
       : state.flow.phase === 'chicken-dusk'
         ? 'dusk'
@@ -1251,8 +1281,98 @@ export function resolveWeaselOutcome(state: GameState, outcome: WeaselOutcome) {
 }
 
 export function advanceNightResult(state: GameState) {
+  if (shouldStartFinale(state.day, state.endingSeen)) {
+    startEpilogueMorning(state);
+    return;
+  }
+
   const nextMorningEgg = state.egg;
   applyFlowEvent(state, { type: 'next-morning' });
+  const deliveredWood = resetMorningState(state, nextMorningEgg);
+  state.message =
+    deliveredWood > 0
+      ? `清晨到了，昨天换回的 ${deliveredWood} 份木料已经送到。先去找今天的蛋。`
+      : '清晨到了。先在院子里找到今天的蛋。';
+}
+
+export function startEpilogueMorning(state: GameState) {
+  applyFlowEvent(state, { type: 'start-epilogue' });
+  const spot = EGG_SPOTS.find((candidate) => candidate.id === 'far-hedge');
+  if (!spot) throw new Error('Finale keepsake spot is missing');
+  const keepsake: EggEntity = {
+    ...spot.position,
+    type: 'balanced',
+    name: '温热的纪念蛋',
+    effect: '这枚蛋记着两周以来的小院生活。',
+    found: false,
+  };
+  const deliveredWood = resetMorningState(state, keepsake);
+  state.eggSearch = createEggSearchState(spot.id);
+  state.chicken = { x: COOP_DOOR.x + 28, y: COOP_DOOR.y - 42 };
+  state.keeper.active = false;
+  state.stormActive = false;
+  state.finaleCheckpointJson = null;
+  state.message =
+    deliveredWood > 0
+      ? `暴风过去了，${deliveredWood} 份木料已经送到。远端草丛里留着一份温热的礼物。`
+      : '暴风过去了。远端草丛里留着一份温热的礼物。';
+}
+
+export function collectKeepsakeEgg(state: GameState) {
+  if (
+    state.flow.phase !== 'epilogue-human' ||
+    !state.egg ||
+    state.egg.found ||
+    !collectCurrentEgg(state.eggSearch)
+  ) {
+    return false;
+  }
+  state.egg.found = true;
+  state.endingSeen = true;
+  state.previousEggSpotId = state.eggSearch.spotId;
+  rememberEgg(state, state.egg.type);
+  applyFlowEvent(state, { type: 'keepsake-found' });
+  state.reward = {
+    title: '清晨的礼物',
+    name: state.egg.name,
+    effect: state.egg.effect,
+  };
+  state.message = '蛋还带着温度。两周的小院日子，一段一段地亮了起来。';
+  return true;
+}
+
+export function continueFreePlay(state: GameState) {
+  if (state.flow.phase !== 'ending') return false;
+  applyFlowEvent(state, { type: 'continue-free-play' });
+  state.freePlay = true;
+  state.stormActive = false;
+  state.finaleCheckpointJson = null;
+  state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 32 };
+  state.keeper.active = true;
+  state.message = '故事讲完了，小院的普通日子还会继续。';
+  return true;
+}
+
+export function canRetryFinale(state: GameState) {
+  return (
+    shouldStartFinale(state.day, state.endingSeen) &&
+    state.stormActive &&
+    state.caughtToday &&
+    Boolean(state.finaleCheckpointJson)
+  );
+}
+
+export function restoreFinaleState(checkpointJson: string) {
+  const restored = restoreGameState(
+    restoreFinaleCheckpoint<GameState>(checkpointJson),
+  );
+  restored.finaleCheckpointJson = checkpointJson;
+  restored.caughtToday = false;
+  restored.message = '风雨回到了黄昏。再试一次，把鸡安全带回窝。';
+  return restored;
+}
+
+function resetMorningState(state: GameState, nextMorningEgg: EggEntity | null) {
   const deliveredWood = deliverPendingWood(state.yard);
   state.nightPressure = 0;
   state.nutrition = 0;
@@ -1306,11 +1426,8 @@ export function advanceNightResult(state: GameState) {
   state.weasel = { x: -120, y: 820, active: false, chasing: false, stunned: 0 };
   state.egg = nextMorningEgg;
   state.reward = null;
-  state.message =
-    deliveredWood > 0
-      ? `清晨到了，昨天换回的 ${deliveredWood} 份木料已经送到。先去找今天的蛋。`
-      : '清晨到了。先在院子里找到今天的蛋。';
   spawnDailyFood(state);
+  return deliveredWood;
 }
 
 export function collectEgg(state: GameState) {
@@ -1429,6 +1546,7 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     goalTip: goalTipFor(state),
     forcedEggType: state.forcedEggType,
     keeperLabel: keeperLabel(state),
+    endingMemories: endingMemoriesFor(state),
     toast: state.message,
     reward: state.reward ? { ...state.reward } : null,
   };
@@ -1441,9 +1559,48 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
   return snapshot;
 }
 
+function endingMemoriesFor(state: GameState) {
+  const abilities = [
+    state.profile.awakenedAbilities.scratch ? '刨土' : null,
+    state.profile.awakenedAbilities.sprint ? '冲刺' : null,
+    state.profile.awakenedAbilities.flutter ? '扑翅' : null,
+  ].filter((ability): ability is string => ability !== null);
+  const foundEggs = state.eggArchive.reduce((total, entry) => total + entry.count, 0);
+  const sharedCloseMoment = state.relationship.dailyKeys.some((key) =>
+    key.endsWith(':close-interaction'),
+  );
+  const safeNights = state.relationship.dailyKeys.filter((key) =>
+    key.endsWith(':safe-close'),
+  ).length;
+
+  return [
+    sharedCloseMoment
+      ? `第一次把食物放进手心时，${state.profile.name}记住了你的气味。`
+      : `${state.profile.name}从最初的戒备，慢慢熟悉了这双手。`,
+    abilities.length > 0
+      ? `${state.profile.name}先后学会了${abilities.join('、')}。`
+      : `${state.profile.name}在院子里找到了自己的生活节奏。`,
+    foundEggs > 0
+      ? `你们一起找到了 ${foundEggs} 枚藏在草地里的蛋。`
+      : '每一个清晨，你都循着叫声走过草地。',
+    state.yard.owned.length > 0
+      ? `小院里有 ${state.yard.owned.length} 处修缮，留下了共同生活的痕迹。`
+      : '旧院子也因为每天的照料，渐渐有了家的样子。',
+    state.relationship.rescueRecorded
+      ? '那次危险里，你第一次真正挡在了它前面。'
+      : `你一次次在黄昏守着${state.profile.name}走回鸡舍。`,
+    safeNights > 0
+      ? `最后一扇门安稳关上，也记着此前 ${safeNights} 个平安夜晚。`
+      : '暴风的最后一夜，鸡舍门终于在身后安稳关上。',
+  ];
+}
+
 function goalTipFor(state: GameState) {
   const tutorial = tutorialForAbility(state.activeAbilityTutorial);
   if (state.mode === 'human') {
+    if (state.flow.phase === 'epilogue-human') {
+      return '沿着最明显的痕迹，在远端草丛寻找昨夜留下的温热鸡蛋。';
+    }
     if (state.flow.phase === 'dusk-human') {
       if (state.weaselEncounter) {
         return `空格撒瓜子继续引${state.profile.name}回窝；按住 F 用提灯照退黄鼠狼。`;
@@ -1582,6 +1739,11 @@ export function restoreGameState(saved: unknown): GameState {
         : null,
     weaselEncounterDoneToday: input.weaselEncounterDoneToday ?? false,
     handLanternActive: false,
+    endingSeen: input.endingSeen ?? false,
+    freePlay: input.freePlay ?? false,
+    finaleCheckpointJson:
+      typeof input.finaleCheckpointJson === 'string' ? input.finaleCheckpointJson : null,
+    stormActive: input.stormActive ?? false,
     upgrades: Array.isArray(input.upgrades) ? input.upgrades : fresh.upgrades,
     daySummary: restoreDaySummary(input.daySummary),
     forcedEggType: isEggType(input.forcedEggType) ? input.forcedEggType : null,
@@ -2350,6 +2512,7 @@ function storyPhaseLabel(phase: StoryPhase) {
   if (phase === 'chicken-dusk') return '黄昏';
   if (phase === 'dusk-human') return '黄昏收鸡';
   if (phase === 'night-result') return '夜里';
+  if (phase === 'epilogue-human') return '清晨的礼物';
   return '归巢之夜';
 }
 

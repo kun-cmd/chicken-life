@@ -1379,3 +1379,85 @@ body[data-phase='night'] #game {
     grid-template-columns: 1fr;
   }
 }
+
+.ending-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 330;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--cream);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(224, 190, 116, 0.2), transparent 38%),
+    linear-gradient(rgba(10, 15, 15, 0.94), rgba(18, 25, 20, 0.98));
+  pointer-events: auto;
+}
+
+.ending-montage,
+.ending-card {
+  width: min(720px, 100%);
+  text-align: center;
+}
+
+.ending-memory {
+  margin: 0;
+  color: #f4e6bd;
+  font-family: Georgia, 'Noto Serif SC', serif;
+  font-size: clamp(24px, 4vw, 46px);
+  line-height: 1.5;
+  text-wrap: balance;
+  animation: ending-memory-in 700ms ease both;
+}
+
+.ending-card {
+  padding: clamp(28px, 5vw, 56px);
+  background: rgba(35, 45, 34, 0.88);
+  border: 1px solid rgba(238, 211, 145, 0.35);
+  border-radius: 24px;
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.46);
+}
+
+.ending-card > span {
+  color: #dfbd73;
+  letter-spacing: 0.14em;
+}
+
+.ending-card h1 {
+  margin: 10px 0 8px;
+  font-family: Georgia, 'Noto Serif SC', serif;
+  font-size: clamp(36px, 6vw, 72px);
+}
+
+.ending-card p {
+  margin: 0 0 24px;
+  color: rgba(244, 231, 190, 0.76);
+}
+
+.ending-card button {
+  min-width: 220px;
+  padding: 13px 22px;
+  color: #2d281d;
+  font-weight: 800;
+  background: #e2bd70;
+  border: 0;
+  border-radius: 999px;
+}
+
+@keyframes ending-memory-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ending-memory {
+    animation: none;
+    transition: opacity 1ms linear;
+  }
+}

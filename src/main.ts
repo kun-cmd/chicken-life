@@ -48,6 +48,13 @@ const hud = {
   namingPanel: document.querySelector<HTMLElement>('#namingPanel')!,
   namingForm: document.querySelector<HTMLFormElement>('#namingForm')!,
   chickenNameInput: document.querySelector<HTMLInputElement>('#chickenNameInput')!,
+  finaleRetryPanel: document.querySelector<HTMLElement>('#finaleRetryPanel')!,
+  finaleRetryButton: document.querySelector<HTMLButtonElement>('#finaleRetryButton')!,
+  endingPanel: document.querySelector<HTMLElement>('#endingPanel')!,
+  endingMontage: document.querySelector<HTMLElement>('#endingMontage')!,
+  endingCard: document.querySelector<HTMLElement>('#endingCard')!,
+  endingChickenName: document.querySelector<HTMLElement>('#endingChickenName')!,
+  continueFreePlay: document.querySelector<HTMLButtonElement>('#continueFreePlay')!,
   closeInteractionPanel: document.querySelector<HTMLElement>('#closeInteractionPanel')!,
   closeChicken: document.querySelector<HTMLElement>('#closeChicken')!,
   closeInteractionTitle: document.querySelector<HTMLElement>('#closeInteractionTitle')!,
@@ -87,6 +94,8 @@ let rewardTimer = 0;
 let debugOpen = false;
 let yardPanelOpen = false;
 let latestSnapshot: HudSnapshot | null = null;
+let endingSequenceStarted = false;
+let endingTimer = 0;
 let closeSelectedFood: ForagingFoodType | null = null;
 let closeSelectedTouch: TouchOption | null = null;
 
@@ -129,6 +138,11 @@ window.addEventListener('chicken-life:close-close', () => {
   hud.closeChicken.dataset.touch = 'none';
 });
 
+window.addEventListener('chicken-life:finale-failed', () => {
+  hud.finaleRetryPanel.hidden = false;
+  hud.finaleRetryButton.focus();
+});
+
 function renderHud(snapshot: HudSnapshot) {
   latestSnapshot = snapshot;
   hud.namingPanel.hidden = !snapshot.requiresNaming;
@@ -146,6 +160,7 @@ function renderHud(snapshot: HudSnapshot) {
   hud.staminaMeter.style.width = `${snapshot.staminaPct}%`;
   hud.contextPrompt.textContent = snapshot.contextPrompt;
   if (yardPanelOpen) renderYardPanel(snapshot);
+  renderEnding(snapshot);
 
   document.body.dataset.phase = snapshot.phase;
   document.body.dataset.mode = snapshot.mode;
@@ -170,6 +185,41 @@ function renderHud(snapshot: HudSnapshot) {
       hud.rewardPanel.hidden = true;
     }, 3600);
   }
+}
+
+function renderEnding(snapshot: HudSnapshot) {
+  if (snapshot.storyPhase !== 'ending') {
+    hud.endingPanel.hidden = true;
+    hud.endingCard.hidden = true;
+    hud.endingMontage.replaceChildren();
+    endingSequenceStarted = false;
+    window.clearTimeout(endingTimer);
+    return;
+  }
+
+  hud.endingPanel.hidden = false;
+  hud.endingChickenName.textContent = snapshot.chickenName;
+  if (endingSequenceStarted) return;
+  endingSequenceStarted = true;
+  hud.endingCard.hidden = true;
+
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let index = 0;
+  const showNextMemory = () => {
+    if (index >= snapshot.endingMemories.length) {
+      hud.endingMontage.replaceChildren();
+      hud.endingCard.hidden = false;
+      hud.continueFreePlay.focus();
+      return;
+    }
+    const memory = document.createElement('p');
+    memory.className = 'ending-memory';
+    memory.textContent = snapshot.endingMemories[index];
+    hud.endingMontage.replaceChildren(memory);
+    index += 1;
+    endingTimer = window.setTimeout(showNextMemory, reducedMotion ? 500 : 2000);
+  };
+  showNextMemory();
 }
 
 function renderYardPanel(snapshot: HudSnapshot) {
@@ -314,6 +364,20 @@ hud.namingForm.addEventListener('submit', (event) => {
       detail: { name: hud.chickenNameInput.value },
     }),
   );
+});
+
+hud.finaleRetryButton.addEventListener('click', () => {
+  hud.finaleRetryPanel.hidden = true;
+  window.dispatchEvent(new CustomEvent('chicken-life:finale-retry'));
+  appRoot.focus({ preventScroll: true });
+});
+
+hud.continueFreePlay.addEventListener('click', () => {
+  window.clearTimeout(endingTimer);
+  hud.endingPanel.hidden = true;
+  endingSequenceStarted = false;
+  window.dispatchEvent(new CustomEvent('chicken-life:ending-continue'));
+  appRoot.focus({ preventScroll: true });
 });
 
 hud.debugClose.addEventListener('click', () => setDebugOpen(false));

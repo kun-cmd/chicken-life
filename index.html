@@ -25,6 +25,39 @@
       </section>
 
       <section
+        id="finaleRetryPanel"
+        class="naming-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="finaleRetryTitle"
+        hidden
+      >
+        <div class="naming-card">
+          <span>归巢之夜</span>
+          <h1 id="finaleRetryTitle">风雨里没能护住它</h1>
+          <p>前十三天都还在。回到今晚黄昏，再试一次。</p>
+          <button id="finaleRetryButton" type="button">从黄昏重新开始</button>
+        </div>
+      </section>
+
+      <section
+        id="endingPanel"
+        class="ending-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="endingTitle"
+        hidden
+      >
+        <div id="endingMontage" class="ending-montage" aria-live="polite"></div>
+        <div id="endingCard" class="ending-card" hidden>
+          <span>清晨的礼物</span>
+          <h1 id="endingTitle"><span id="endingChickenName"></span>回家了</h1>
+          <p>小院的故事讲完了，普通的日子还会继续。</p>
+          <button id="continueFreePlay" type="button">继续小院生活</button>
+        </div>
+      </section>
+
+      <section
         id="closeInteractionPanel"
         class="close-interaction"
         role="dialog"

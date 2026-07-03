@@ -57,9 +57,12 @@ import {
   applyCloseInteraction,
   applyFlowEvent,
   buildHudSnapshot,
+  canRetryFinale,
   cluckAt,
   collectEgg,
+  collectKeepsakeEgg,
   completeAbilityTutorial,
+  continueFreePlay,
   createGameState,
   currentRelationshipStage,
   debugAddAffection,
@@ -79,6 +82,7 @@ import {
   restockEdibleFoods,
   restInHole,
   resolveWeaselOutcome,
+  restoreFinaleState,
   restoreGameState,
   setChickenName,
   spawnScratchWorm,
@@ -253,6 +257,7 @@ export class GameScene extends Phaser.Scene {
   private closeInteractionTimer: Phaser.Time.TimerEvent | null = null;
   private yardPanelOpen = false;
   private coopDoorClosing = false;
+  private finaleRetryOpen = false;
 
   private handleGameplayKeyDown = (event: KeyboardEvent) => {
     if (
@@ -341,6 +346,29 @@ export class GameScene extends Phaser.Scene {
   private handleYardPanelClose = () => {
     this.yardPanelOpen = false;
     this.resetGameplayKeys();
+  };
+
+  private handleFinaleRetry = () => {
+    const checkpointJson = this.state.finaleCheckpointJson;
+    if (!checkpointJson) return;
+    this.state = restoreFinaleState(checkpointJson);
+    this.finaleRetryOpen = false;
+    this.duskCollection = createDuskCollectionState();
+    this.clearDuskSeedViews();
+    this.clearHouseResponseLight();
+    this.resetGameplayKeys();
+    this.rebuildWorldFromState();
+    this.emitHud(true, true);
+  };
+
+  private handleEndingContinue = () => {
+    if (!continueFreePlay(this.state)) return;
+    this.duskCollection = createDuskCollectionState();
+    this.clearDuskSeedViews();
+    this.clearHouseResponseLight();
+    this.resetGameplayKeys();
+    this.rebuildWorldFromState();
+    this.emitHud(true, true);
   };
 
   private handleBuyUpgrade = (event: Event) => {
@@ -482,6 +510,8 @@ export class GameScene extends Phaser.Scene {
     window.addEventListener('chicken-life:yard-panel-open', this.handleYardPanelOpen);
     window.addEventListener('chicken-life:yard-panel-close', this.handleYardPanelClose);
     window.addEventListener('chicken-life:buy-upgrade', this.handleBuyUpgrade);
+    window.addEventListener('chicken-life:finale-retry', this.handleFinaleRetry);
+    window.addEventListener('chicken-life:ending-continue', this.handleEndingContinue);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('chicken-life:debug', this.handleDebugEvent);
       window.removeEventListener('chicken-life:volume', this.handleVolumeEvent);
@@ -490,6 +520,8 @@ export class GameScene extends Phaser.Scene {
       window.removeEventListener('chicken-life:yard-panel-open', this.handleYardPanelOpen);
       window.removeEventListener('chicken-life:yard-panel-close', this.handleYardPanelClose);
       window.removeEventListener('chicken-life:buy-upgrade', this.handleBuyUpgrade);
+      window.removeEventListener('chicken-life:finale-retry', this.handleFinaleRetry);
+      window.removeEventListener('chicken-life:ending-continue', this.handleEndingContinue);
       window.removeEventListener('keydown', this.handleMusicUnlock);
       window.removeEventListener('keydown', this.handleGameplayKeyDown, { capture: true });
       window.removeEventListener('keyup', this.handleGameplayKeyUp, { capture: true });
@@ -501,6 +533,7 @@ export class GameScene extends Phaser.Scene {
       this.closeInteractionTimer?.remove(false);
     });
     this.applySceneViewFromState();
+    if (canRetryFinale(this.state)) this.showFinaleRetry();
     this.updateWeatherView(0);
     this.emitHud(true);
   }
@@ -513,7 +546,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (this.closeInteractionOpen || this.yardPanelOpen) {
+    if (this.closeInteractionOpen || this.yardPanelOpen || this.finaleRetryOpen) {
       this.resetGameplayKeys();
       this.updateSprites(0);
       this.updateWeatherView(time);
@@ -540,7 +573,11 @@ export class GameScene extends Phaser.Scene {
     this.chickenLiftTimer = Math.max(0, this.chickenLiftTimer - dt);
 
     const storyPhase = this.state.flow.phase;
-    if (storyPhase === 'morning-human' || storyPhase === 'dusk-human') {
+    if (
+      storyPhase === 'morning-human' ||
+      storyPhase === 'dusk-human' ||
+      storyPhase === 'epilogue-human'
+    ) {
       this.updateHuman(dt, actions);
     } else if (storyPhase === 'chicken-day' || storyPhase === 'chicken-dusk') {
       this.updateChicken(dt, actions);
@@ -820,7 +857,9 @@ export class GameScene extends Phaser.Scene {
 
   private advanceChickenWorld(actionSeconds: number) {
     if (actionSeconds <= 0) return;
+    const previousCheckpoint = this.state.finaleCheckpointJson;
     applyFlowEvent(this.state, { type: 'tick', amount: actionSeconds / 155 });
+    if (!previousCheckpoint && this.state.finaleCheckpointJson) this.saveGame(true);
     const actorSeconds = Math.min(actionSeconds, 0.08);
     const newSeed = updateKeeper(this.state, actorSeconds, actionSeconds);
     if (newSeed) {
@@ -883,6 +922,11 @@ export class GameScene extends Phaser.Scene {
     if (result.outcome === 'safe') return false;
 
     this.state.message = '黄鼠狼扑了过来，鸡惊叫着躲开；今晚留下了受惊的记忆。';
+    if (canRetryFinale(this.state)) {
+      this.showFinaleRetry();
+      this.emitHud(true, true);
+      return true;
+    }
     if (this.state.flow.phase === 'chicken-dusk') {
       this.state.human = {
         x: HOUSE.x + HOUSE.width * 0.5,
@@ -925,6 +969,28 @@ export class GameScene extends Phaser.Scene {
     const nearHouseDoor = distance(this.state.human, houseDoor) < 112;
     if (this.state.flow.phase === 'dusk-human') {
       this.updateDuskCollection(dt, actions, nearCoop);
+      return;
+    }
+
+    if (this.state.flow.phase === 'epilogue-human') {
+      if (this.state.egg && !this.state.egg.found) {
+        this.state.eggSearch = advanceEggSearch(this.state.eggSearch, dt);
+      }
+      this.updateEggGuidance(dt);
+      if (this.state.egg && !this.state.egg.found && actions.searchPressed) {
+        if (distance(this.state.human, this.state.egg) < EGG_PICKUP_RANGE) {
+          if (collectKeepsakeEgg(this.state)) {
+            this.playSfx(SFX_REWARD_KEY, 0.64);
+            this.revealEgg();
+            this.clearEggClueView();
+            this.emitHud(true, true);
+            window.dispatchEvent(new CustomEvent('chicken-life:ending-ready'));
+          }
+        } else {
+          this.state.message = `这里没有蛋；${this.state.profile.name}在鸡舍里朝远端草丛叫了两声。`;
+          this.showEggDirectionClue();
+        }
+      }
       return;
     }
 
@@ -1161,6 +1227,12 @@ export class GameScene extends Phaser.Scene {
     this.createHoleViews();
     this.drawOwnedYardUpgrades();
     this.applySceneViewFromState();
+  }
+
+  private showFinaleRetry() {
+    this.finaleRetryOpen = true;
+    this.resetGameplayKeys();
+    window.dispatchEvent(new CustomEvent('chicken-life:finale-failed'));
   }
 
   private applySceneViewFromState() {
@@ -2062,7 +2134,8 @@ export class GameScene extends Phaser.Scene {
   private syncEggClueView() {
     const spot = this.currentEggSpot();
     const visible =
-      this.state.flow.phase === 'morning-human' &&
+      (this.state.flow.phase === 'morning-human' ||
+        this.state.flow.phase === 'epilogue-human') &&
       Boolean(this.state.egg && !this.state.egg.found && spot);
     if (!visible || !spot) {
       this.clearEggClueView();
@@ -2115,7 +2188,10 @@ export class GameScene extends Phaser.Scene {
     if (Math.abs(dx) > 2) this.state.chickenWander.facing = dx > 0 ? 1 : -1;
     this.showCluckFx(this.state.chicken, 0);
     this.time.delayedCall(260, () => {
-      if (this.state.flow.phase === 'morning-human') {
+      if (
+        this.state.flow.phase === 'morning-human' ||
+        this.state.flow.phase === 'epilogue-human'
+      ) {
         this.showCluckFx(this.state.chicken, 0);
       }
     });
@@ -2280,20 +2356,26 @@ export class GameScene extends Phaser.Scene {
   private updateWeatherView(time: number) {
     this.weatherOverlay.clear();
     this.rainView.clear();
-    if (this.state.weather === 'sunny') return;
+    const weather = this.state.stormActive ? 'rain' : this.state.weather;
+    if (weather === 'sunny') return;
 
     this.weatherOverlay.fillStyle(
-      this.state.weather === 'rain' ? 0x4c6470 : 0x52605d,
-      this.state.weather === 'rain' ? 0.16 : 0.09,
+      weather === 'rain' ? 0x4c6470 : 0x52605d,
+      this.state.stormActive
+        ? 0.24 + Math.max(0, Math.sin(time / 280)) * 0.08
+        : weather === 'rain'
+          ? 0.16
+          : 0.09,
     );
     this.weatherOverlay.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-    if (this.state.weather !== 'rain') return;
+    if (weather !== 'rain') return;
 
-    this.rainView.lineStyle(2, 0xb8d8df, 0.42);
-    for (let index = 0; index < 34; index += 1) {
-      const x = (index * 173 + time * 0.38) % WORLD_WIDTH;
-      const y = (index * 97 + time * 0.62) % WORLD_HEIGHT;
-      this.rainView.lineBetween(x, y, x - 9, y + 25);
+    this.rainView.lineStyle(2, 0xb8d8df, this.state.stormActive ? 0.58 : 0.42);
+    const rainCount = this.state.stormActive ? 54 : 34;
+    for (let index = 0; index < rainCount; index += 1) {
+      const x = (index * 173 + time * (this.state.stormActive ? 0.56 : 0.38)) % WORLD_WIDTH;
+      const y = (index * 97 + time * (this.state.stormActive ? 0.82 : 0.62)) % WORLD_HEIGHT;
+      this.rainView.lineBetween(x, y, x - 9, y + (this.state.stormActive ? 31 : 25));
     }
   }
 

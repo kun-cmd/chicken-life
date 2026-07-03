@@ -4,6 +4,7 @@ export type StoryPhase =
   | 'chicken-dusk'
   | 'dusk-human'
   | 'night-result'
+  | 'epilogue-human'
   | 'ending';
 
 export interface DayFlowState {
@@ -22,7 +23,10 @@ export type DayFlowEvent =
   | { type: 'call-human' }
   | { type: 'chicken-entered-coop' }
   | { type: 'close-door' }
-  | { type: 'next-morning' };
+  | { type: 'next-morning' }
+  | { type: 'start-epilogue' }
+  | { type: 'keepsake-found' }
+  | { type: 'continue-free-play' };
 
 const DUSK_AT = 0.65;
 
@@ -39,7 +43,9 @@ export function createDayFlow(overrides: Partial<DayFlowState> = {}): DayFlowSta
 }
 
 export function activeActor(phase: StoryPhase): 'human' | 'chicken' | 'none' {
-  if (phase === 'morning-human' || phase === 'dusk-human') return 'human';
+  if (phase === 'morning-human' || phase === 'dusk-human' || phase === 'epilogue-human') {
+    return 'human';
+  }
   if (phase === 'chicken-day' || phase === 'chicken-dusk') return 'chicken';
   return 'none';
 }
@@ -87,6 +93,35 @@ export function reduceDayFlow(state: DayFlowState, event: DayFlowEvent): DayFlow
   if (event.type === 'next-morning') {
     if (state.phase !== 'night-result') throw new Error('Next morning requires night result');
     return createDayFlow({ day: state.day + 1 });
+  }
+
+  if (event.type === 'start-epilogue') {
+    if (state.phase !== 'night-result') throw new Error('Epilogue requires night result');
+    return {
+      ...state,
+      day: state.day + 1,
+      phase: 'epilogue-human',
+      clock: 0.08,
+      morningEggFound: false,
+      chickenInCoop: true,
+      coopDoorClosed: true,
+    };
+  }
+
+  if (event.type === 'keepsake-found') {
+    if (state.phase !== 'epilogue-human') throw new Error('Keepsake requires epilogue search');
+    return { ...state, phase: 'ending', morningEggFound: true };
+  }
+
+  if (event.type === 'continue-free-play') {
+    if (state.phase !== 'ending') throw new Error('Free play requires ending');
+    return {
+      ...state,
+      phase: 'morning-human',
+      morningEggFound: true,
+      chickenInCoop: false,
+      coopDoorClosed: false,
+    };
   }
 
   return state;
