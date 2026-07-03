@@ -143,6 +143,9 @@ const SFX_NIGHT_RUSTLE_KEY = 'sfx-night-rustle';
 const CHICKEN_WALK_MOVE_EPSILON = 0.04;
 const CHICKEN_WALK_TELEPORT_DISTANCE = 28;
 const CLOSE_INTERACTION_RANGE = 74;
+const EGG_PICKUP_RANGE = 76;
+const EGG_SHAPE_REVEAL_RANGE = 112;
+const EGG_SHAPE_ALPHA = 0.68;
 const CLOSE_INTERACTION_DURATION = 4800;
 const CLOSE_INTERACTION_REDUCED_DURATION = 720;
 const GAMEPLAY_KEY_CODES = new Set([
@@ -229,7 +232,7 @@ export class GameScene extends Phaser.Scene {
   private drinkSfxCooldown = 0;
   private caughtCooldown = 0;
   private eggClueSoundCooldown = 0;
-  private eggDirectionTimer = 7.5;
+  private eggDirectionTimer = 0;
   private rustleSfxCooldown = 0;
   private humanFacingDirection: Vec2 = { x: 0, y: 1 };
   private chickenLiftTimer = 0;
@@ -945,7 +948,7 @@ export class GameScene extends Phaser.Scene {
     if (this.state.egg && !this.state.egg.found) {
       const eggDistance = distance(this.state.human, this.state.egg);
       if (actions.searchPressed) {
-        if (eggDistance < 76) {
+        if (eggDistance < EGG_PICKUP_RANGE) {
           collectEgg(this.state);
           applyFlowEvent(this.state, { type: 'egg-found' });
           this.playSfx(SFX_REWARD_KEY, 0.64);
@@ -1110,7 +1113,7 @@ export class GameScene extends Phaser.Scene {
     this.duskCollection = createDuskCollectionState();
     this.coopDoorClosing = false;
     this.eggClueSoundCooldown = 0;
-    this.eggDirectionTimer = 7.5;
+    this.eggDirectionTimer = 0;
     this.state.handLanternActive = false;
     this.clearDuskSeedViews();
     this.clearHouseResponseLight();
@@ -2019,7 +2022,7 @@ export class GameScene extends Phaser.Scene {
 
   private revealEgg() {
     if (!this.eggView) this.createEggView(true);
-    this.eggView?.setVisible(true);
+    this.eggView?.setVisible(true).setAlpha(1);
     this.tweens.add({
       targets: this.eggView,
       y: this.eggView!.y - 12,
@@ -2038,6 +2041,9 @@ export class GameScene extends Phaser.Scene {
     this.eggDirectionTimer = Math.max(0, this.eggDirectionTimer - dt);
     if (!this.state.egg || this.state.egg.found) return;
 
+    const showEggShape = distance(this.state.human, this.state.egg) < EGG_SHAPE_REVEAL_RANGE;
+    this.eggView?.setVisible(showEggShape).setAlpha(showEggShape ? EGG_SHAPE_ALPHA : 1);
+
     if (
       this.state.eggSearch.clueLevel >= 1 &&
       distance(this.state.human, this.state.egg) < 360 &&
@@ -2047,7 +2053,7 @@ export class GameScene extends Phaser.Scene {
       this.eggClueSoundCooldown = 6;
     }
 
-    if (this.state.eggSearch.clueLevel >= 2 && this.eggDirectionTimer === 0) {
+    if (this.eggDirectionTimer === 0) {
       this.showEggDirectionClue();
       this.eggDirectionTimer = 7.5;
     }

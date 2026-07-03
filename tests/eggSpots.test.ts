@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { EGG_SPOTS, selectEggSpot } from '../src/game/content/eggSpots';
-import { isBlocked } from '../src/game/content/yard';
+import { isBlocked, isInPlantPatch, isOnPath } from '../src/game/content/yard';
 import { createSeededRandom } from '../src/game/systems/seededRandom';
 
 test('opens three, five, and eight egg spots by story chapter', () => {
@@ -38,5 +38,7 @@ test('egg and clue positions are reachable', () => {
   for (const spot of EGG_SPOTS) {
     assert.equal(isBlocked(spot.position, 12), false, `${spot.id} egg is blocked`);
     assert.equal(isBlocked(spot.cluePosition, 12), false, `${spot.id} clue is blocked`);
+    assert.equal(isInPlantPatch(spot.position), true, `${spot.id} egg is not in grass`);
+    assert.equal(isOnPath(spot.position), false, `${spot.id} egg is on a path`);
   }
 });

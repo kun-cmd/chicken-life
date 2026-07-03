@@ -17,7 +17,7 @@ import {
   isNearPond,
   isOnPath,
 } from '../content/yard';
-import { selectEggSpot } from '../content/eggSpots';
+import { EGG_SPOTS, selectEggSpot } from '../content/eggSpots';
 import { YARD_LAMP_POSITION } from '../content/yardUpgrades';
 import {
   createChickenProfile,
@@ -361,8 +361,7 @@ const RAIN_MUD_SECONDS = 4;
 
 function createTutorialEgg(): EggEntity {
   return {
-    x: 1005,
-    y: 430,
+    ...EGG_SPOTS[0].position,
     type: 'balanced',
     name: '第一枚蛋',
     effect: '找到蛋后，才放心把鸡放进院子。',
@@ -451,7 +450,7 @@ export function createGameState(): GameState {
     foods: [],
     holes: [],
     egg: createTutorialEgg(),
-    eggSearch: createEggSearchState('coop-straw'),
+    eggSearch: createEggSearchState(EGG_SPOTS[0].id),
     previousEggSpotId: null,
     eggArchive: [],
     animals: [],
@@ -1611,6 +1610,17 @@ export function restoreGameState(saved: unknown): GameState {
       ...createEggSearchState(spot.id),
       found: input.egg.found,
     };
+  }
+  if (restored.egg && !restored.egg.found) {
+    const spot =
+      EGG_SPOTS.find((candidate) => candidate.id === restored.eggSearch.spotId) ??
+      selectEggSpot(
+        restored.day,
+        restored.previousEggSpotId,
+        createSeededRandom(restored.profile.runSeed + restored.day * 7919),
+      );
+    restored.egg = { ...restored.egg, ...spot.position };
+    restored.eggSearch.spotId = spot.id;
   }
   syncLegacyPhaseFromFlow(restored);
   return restored;
