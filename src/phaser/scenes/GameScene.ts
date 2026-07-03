@@ -65,10 +65,8 @@ import {
   continueFreePlay,
   createGameState,
   currentRelationshipStage,
-  debugAddAffection,
   debugAddMaterials,
   debugJumpToDusk,
-  debugSetEggType,
   digHole,
   drinkAtPond,
   expireFoods,
@@ -95,7 +93,7 @@ import {
   updateMorningChickenWander,
   visibleFoods,
 } from '../../game/simulation/state';
-import type { EggType, FoodEntity, HoleEntity, Vec2, YardAnimal } from '../../game/simulation/state';
+import type { FoodEntity, HoleEntity, Vec2, YardAnimal } from '../../game/simulation/state';
 import type { InputActions } from '../../game/input/actions';
 import { KeyboardState } from '../../game/input/keyboardState';
 import { isForagingFood } from '../../game/systems/foraging';
@@ -120,15 +118,9 @@ import { hasWeaselEncounter } from '../../game/systems/weaselSchedule';
 type FoodView = Phaser.GameObjects.Image & { foodId: number };
 type AnimalView = Phaser.GameObjects.Image & { animalId: number; animalType: YardAnimal['type'] };
 type DebugAction =
-  | { action: 'addAffection' }
   | { action: 'addMaterials' }
   | { action: 'jumpDusk' }
-  | { action: 'setLowAffection' }
-  | { action: 'setHighAffection' }
-  | { action: 'cycleWeather' }
-  | { action: 'unlockAbilities' }
   | { action: 'spawnWeasel' }
-  | { action: 'forceEgg'; eggType: EggType }
   | { action: 'clearSave' };
 
 const VOLUME_STORAGE_KEY = 'chicken-life-master-volume';
@@ -410,10 +402,6 @@ export class GameScene extends Phaser.Scene {
     const detail = (event as CustomEvent<DebugAction>).detail;
     if (!detail) return;
 
-    if (detail.action === 'addAffection') {
-      debugAddAffection(this.state);
-      this.showHeartFx(this.state.chicken);
-    }
     if (detail.action === 'addMaterials') debugAddMaterials(this.state);
     if (detail.action === 'jumpDusk') {
       debugJumpToDusk(this.state);
@@ -421,30 +409,6 @@ export class GameScene extends Phaser.Scene {
       this.clearDuskSeedViews();
       this.clearHouseResponseLight();
       this.syncCoopDoorView();
-    }
-    if (detail.action === 'setLowAffection') {
-      this.state.affection = 20;
-      this.state.message = '调试：切换到低亲密归巢预设。';
-    }
-    if (detail.action === 'setHighAffection') {
-      this.state.affection = 90;
-      this.state.message = '调试：切换到高亲密归巢预设。';
-    }
-    if (detail.action === 'cycleWeather') {
-      const weather = ['sunny', 'cloudy', 'rain'] as const;
-      this.state.weather = weather[(weather.indexOf(this.state.weather) + 1) % weather.length];
-      this.state.offPathRainSeconds = 0;
-      this.state.muddyToday = false;
-      this.state.message = `调试：天气切换为${
-        this.state.weather === 'sunny' ? '晴天' : this.state.weather === 'cloudy' ? '阴天' : '雨天'
-      }。`;
-    }
-    if (detail.action === 'unlockAbilities') {
-      this.state.profile.awakenedAbilities.scratch = true;
-      this.state.profile.awakenedAbilities.sprint = true;
-      this.state.profile.awakenedAbilities.flutter = true;
-      this.state.activeAbilityTutorial = null;
-      this.state.message = '调试：刨土、冲刺和扑翅已经全部解锁。';
     }
     if (detail.action === 'spawnWeasel') {
       if (
@@ -457,7 +421,6 @@ export class GameScene extends Phaser.Scene {
         this.state.message = '调试：只有黄昏阶段才能生成黄鼠狼。';
       }
     }
-    if (detail.action === 'forceEgg') debugSetEggType(this.state, detail.eggType);
     if (detail.action === 'clearSave') {
       try {
         window.localStorage.removeItem(SAVE_KEY);

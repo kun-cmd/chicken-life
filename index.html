@@ -153,34 +153,17 @@
             <button id="debugClose" type="button">×</button>
           </div>
           <div class="debug-actions">
-            <button type="button" data-debug="addAffection">+亲密</button>
-            <button type="button" data-debug="addMaterials">+木料</button>
+            <button type="button" data-debug="addMaterials">补充木料</button>
             <button type="button" data-debug="jumpDusk">跳黄昏</button>
-            <button type="button" data-debug="setLowAffection">低亲密归巢</button>
-            <button type="button" data-debug="setHighAffection">高亲密归巢</button>
-            <button type="button" data-debug="spawnWeasel">黄鼠狼</button>
+            <button type="button" data-debug="spawnWeasel">生成黄鼠狼</button>
             <button type="button" data-debug="clearSave">清空存档</button>
           </div>
-          <label class="debug-egg">
-            <span>指定产蛋</span>
-            <select id="debugEggType">
-              <option value="greenLeaf">青叶蛋</option>
-              <option value="swift">疾走蛋</option>
-              <option value="lantern">守夜蛋</option>
-              <option value="brave">铁胆蛋</option>
-              <option value="sunny">暖瓜子蛋</option>
-              <option value="fullBelly">饱饱蛋</option>
-              <option value="balanced">均衡蛋</option>
-              <option value="cracked">裂纹蛋</option>
-            </select>
-            <button type="button" id="forceEggButton">指定</button>
-          </label>
           <label class="debug-volume">
             <span>总音量</span>
             <input id="masterVolume" type="range" min="0" max="100" step="1" value="70" />
             <b id="masterVolumeLabel">70%</b>
           </label>
-          <p>F1 开关调试，F2 +亲密，F3 +木料，F4 跳黄昏，F5 生成黄鼠狼。</p>
+          <p>F1 开关调试，F2 补充木料，F3 跳黄昏，F4 生成黄鼠狼。</p>
         </section>
       </div>
     </div>

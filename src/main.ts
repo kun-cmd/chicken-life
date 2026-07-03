@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import './style.css';
 import { GameScene } from './phaser/scenes/GameScene';
-import type { EggType, HudSnapshot } from './game/simulation/state';
+import type { HudSnapshot } from './game/simulation/state';
 import { YARD_UPGRADES } from './game/content/yardUpgrades';
 import { foodDisplayName, type ForagingFoodType } from './game/systems/foraging';
 import type { TouchOption } from './game/systems/closeInteraction';
@@ -83,8 +83,6 @@ const hud = {
   rewardEffect: document.querySelector<HTMLElement>('#rewardEffect')!,
   debugPanel: document.querySelector<HTMLElement>('#debugPanel')!,
   debugClose: document.querySelector<HTMLButtonElement>('#debugClose')!,
-  debugEggType: document.querySelector<HTMLSelectElement>('#debugEggType')!,
-  forceEggButton: document.querySelector<HTMLButtonElement>('#forceEggButton')!,
   masterVolume: document.querySelector<HTMLInputElement>('#masterVolume')!,
   masterVolumeLabel: document.querySelector<HTMLElement>('#masterVolumeLabel')!,
 };
@@ -385,9 +383,6 @@ hud.yardPanelClose.addEventListener('click', () => setYardPanelOpen(false));
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-debug]')) {
   button.addEventListener('click', () => dispatchDebug(button.dataset.debug ?? ''));
 }
-hud.forceEggButton.addEventListener('click', () => {
-  dispatchDebug('forceEgg', hud.debugEggType.value as EggType);
-});
 
 window.addEventListener('keydown', (event) => {
   if (
@@ -410,12 +405,9 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     setDebugOpen(!debugOpen);
   }
-  if (event.key === 'F2') dispatchDebug('addAffection');
-  if (event.key === 'F3') dispatchDebug('addMaterials');
-  if (event.key === 'F4') dispatchDebug('jumpDusk');
-  if (event.key === 'F5') dispatchDebug('spawnWeasel');
-  if (event.key === 'F6') dispatchDebug('cycleWeather');
-  if (event.key === 'F7') dispatchDebug('unlockAbilities');
+  if (event.key === 'F2') dispatchDebug('addMaterials');
+  if (event.key === 'F3') dispatchDebug('jumpDusk');
+  if (event.key === 'F4') dispatchDebug('spawnWeasel');
 });
 
 function setDebugOpen(open: boolean) {
@@ -423,9 +415,8 @@ function setDebugOpen(open: boolean) {
   hud.debugPanel.hidden = !open;
 }
 
-function dispatchDebug(action: string, eggType?: EggType) {
-  const detail = action === 'forceEgg' ? { action, eggType } : { action };
-  window.dispatchEvent(new CustomEvent('chicken-life:debug', { detail }));
+function dispatchDebug(action: string) {
+  window.dispatchEvent(new CustomEvent('chicken-life:debug', { detail: { action } }));
 }
 
 function setupVolumeControl() {
