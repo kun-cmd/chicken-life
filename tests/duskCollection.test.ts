@@ -64,10 +64,12 @@ test('the chicken notices only a visible seed and pauses one second after eating
   assert.equal(state.eatPause, 0);
 });
 
-test('coop ritual requires a door seed, opening, chicken entry, then closing', () => {
+test('coop ritual requires eating the door seed before opening, entry, then closing', () => {
   const state = createDuskCollectionState();
   assert.equal(openCoopDoor(state), false);
-  placeLureSeed(state, { x: 10, y: 20 }, true);
+  const doorSeed = placeLureSeed(state, { x: 10, y: 20 }, true)!;
+  assert.equal(openCoopDoor(state), false);
+  assert.equal(eatLureSeed(state, doorSeed.id), true);
   assert.equal(openCoopDoor(state), true);
   assert.equal(canCloseCoopDoor(state), false);
   assert.equal(markChickenInside(state), true);

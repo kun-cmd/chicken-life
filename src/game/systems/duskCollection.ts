@@ -22,6 +22,8 @@ export interface DuskCollectionState {
   scatterCooldown: number;
   eatPause: number;
   doorSeedPlaced: boolean;
+  doorSeedId: number | null;
+  doorSeedEaten: boolean;
 }
 
 export const HOME_CALL_HEARD_COUNT = 2;
@@ -48,6 +50,8 @@ export function createDuskCollectionState(): DuskCollectionState {
     scatterCooldown: 0,
     eatPause: 0,
     doorSeedPlaced: false,
+    doorSeedId: null,
+    doorSeedEaten: false,
   };
 }
 
@@ -97,7 +101,11 @@ export function placeLureSeed(
   const seed = { id: state.nextSeedId++, x: position.x, y: position.y };
   state.seeds.push(seed);
   state.scatterCooldown = LURE_SEED_DROP_INTERVAL;
-  if (atCoopDoor) state.doorSeedPlaced = true;
+  if (atCoopDoor) {
+    state.doorSeedPlaced = true;
+    state.doorSeedId = seed.id;
+    state.doorSeedEaten = false;
+  }
   return seed;
 }
 
@@ -128,13 +136,14 @@ export function eatLureSeed(state: DuskCollectionState, seedId: number) {
   const index = state.seeds.findIndex((seed) => seed.id === seedId);
   if (index < 0) return false;
   state.seeds.splice(index, 1);
+  if (seedId === state.doorSeedId) state.doorSeedEaten = true;
   state.targetSeedId = null;
   state.eatPause = LURE_SEED_EAT_PAUSE;
   return true;
 }
 
 export function openCoopDoor(state: DuskCollectionState) {
-  if (state.phase !== 'escorting' || !state.doorSeedPlaced) return false;
+  if (state.phase !== 'escorting' || !state.doorSeedPlaced || !state.doorSeedEaten) return false;
   state.phase = 'coop-open';
   state.targetSeedId = null;
   return true;

@@ -1095,6 +1095,8 @@ export class GameScene extends Phaser.Scene {
         this.state.message = `${this.state.profile.name}还在进窝，先等它跨过门槛。`;
       } else if (!this.duskCollection.doorSeedPlaced) {
         this.state.message = '先在鸡舍门前按空格撒一粒瓜子。';
+      } else if (!this.duskCollection.doorSeedEaten) {
+        this.state.message = `等${this.state.profile.name}吃到门前那粒瓜子，再开门。`;
       } else if (openCoopDoor(this.duskCollection)) {
         this.syncCoopDoorView();
         this.state.message = `鸡舍门打开了，${this.state.profile.name}会自己进去。`;

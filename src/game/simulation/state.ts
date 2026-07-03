@@ -485,7 +485,7 @@ export function createGameState(): GameState {
     upgrades: [],
     daySummary: null,
     forcedEggType: null,
-    message: '白天开始了，小院里有米粒、草籽和蚯蚓。',
+    message: '清晨到了。鸡已经在院子里，先跟着它的叫声找蛋。',
     reward: null,
     nextId: 1,
   };
