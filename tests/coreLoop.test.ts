@@ -16,6 +16,19 @@ import {
   updateNightPressure,
 } from '../src/game/simulation/state';
 import { YARD_LAMP_POSITION } from '../src/game/content/yardUpgrades';
+import {
+  DAY_ACTIVE_SECONDS,
+  DUSK_AT,
+} from '../src/game/systems/dayFlow';
+
+test('the active-time day keeps its original length and reveals night bugs at dusk', () => {
+  const state = createGameState();
+  const nightBugs = state.foods.filter((food) => food.type === 'nightBug');
+
+  assert.equal(DAY_ACTIVE_SECONDS, 155);
+  assert.equal(nightBugs.length, 2);
+  assert.ok(nightBugs.every((food) => food.visibleAt === DUSK_AT));
+});
 
 test('sprinting heats the chicken while shade and water cool it', () => {
   const hot = advanceHeat(20, 1, {

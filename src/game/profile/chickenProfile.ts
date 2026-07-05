@@ -26,7 +26,7 @@ export function createChickenProfile(runSeed = Date.now()): ChickenProfile {
       peck: true,
       cluck: true,
       scratch: false,
-      sprint: false,
+      sprint: true,
       flutter: false,
     },
   };

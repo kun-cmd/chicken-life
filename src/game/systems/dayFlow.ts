@@ -30,8 +30,9 @@ export type DayFlowEvent =
   | { type: 'keepsake-found' }
   | { type: 'continue-free-play' };
 
-const DUSK_AT = 0.65;
-const NIGHT_AT = 0.82;
+export const DAY_ACTIVE_SECONDS = 155;
+export const DUSK_AT = 0.65;
+export const NIGHT_AT = 0.82;
 
 export function createDayFlow(overrides: Partial<DayFlowState> = {}): DayFlowState {
   return {

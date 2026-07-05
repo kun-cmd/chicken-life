@@ -15,13 +15,13 @@ test('uses the default name for blank input', () => {
   assert.equal(normalizeChickenName('   '), DEFAULT_CHICKEN_NAME);
 });
 
-test('starts with only peck and cluck awakened', () => {
+test('starts with peck, cluck, and sprint awakened', () => {
   const profile = createChickenProfile(1234);
   assert.deepEqual(profile.awakenedAbilities, {
     peck: true,
     cluck: true,
     scratch: false,
-    sprint: false,
+    sprint: true,
     flutter: false,
   });
   assert.equal(profile.runSeed, 1234);

@@ -32,6 +32,7 @@ import {
   type YardUpgradeId,
 } from '../../game/content/yardUpgrades';
 import { canUseAbility } from '../../game/systems/abilities';
+import { DAY_ACTIVE_SECONDS } from '../../game/systems/dayFlow';
 import {
   COOP_FINAL_SEED_RANGE,
   HOME_CALL_HOLD_INTERVAL,
@@ -715,11 +716,8 @@ export class GameScene extends Phaser.Scene {
 
   private updateChicken(dt: number, actions: InputActions) {
     let actionSeconds = 0;
-    this.updateMovingFoods(dt);
-    if (updateWeatherExposure(this.state, dt)) {
-      this.state.message = '雨水把泥地打湿了，鸡爪和腹羽都沾上了一点泥。';
-    }
     if (this.state.facilityLife.activity) {
+      const activeSeconds = dt * 0.72;
       const completed = advanceFacilityActivity(this.state.facilityLife, dt);
       if (completed) {
         this.state.message = completed.firstToday
@@ -727,7 +725,11 @@ export class GameScene extends Phaser.Scene {
           : '鸡伸了伸翅膀，又精神起来。';
         this.saveGame(true);
       }
-      advanceChickenHeat(this.state, dt, {
+      this.updateMovingFoods(activeSeconds);
+      if (updateWeatherExposure(this.state, activeSeconds)) {
+        this.state.message = '雨水把泥地打湿了，鸡爪和腹羽都沾上了一点泥。';
+      }
+      advanceChickenHeat(this.state, activeSeconds, {
         sprinting: false,
         moving: false,
         inShade: this.state.facilityLife.activity === 'shade-rest',
@@ -735,13 +737,18 @@ export class GameScene extends Phaser.Scene {
         raining: this.state.weather === 'rain',
         night: this.state.flow.phase === 'chicken-night',
       });
-      this.advanceChickenWorld(dt * 0.72);
-      this.updateChickenPressure(dt);
-      this.updateRealtimeThreats(dt);
+      this.advanceChickenWorld(activeSeconds);
+      this.updateChickenPressure(activeSeconds);
+      this.updateRealtimeThreats(activeSeconds);
       return;
     }
     if (this.state.body.fluttering) {
-      advanceChickenHeat(this.state, dt, {
+      const activeSeconds = dt * 0.35;
+      this.updateMovingFoods(activeSeconds);
+      if (updateWeatherExposure(this.state, activeSeconds)) {
+        this.state.message = '雨水把泥地打湿了，鸡爪和腹羽都沾上了一点泥。';
+      }
+      advanceChickenHeat(this.state, activeSeconds, {
         sprinting: true,
         moving: true,
         inShade: false,
@@ -749,9 +756,9 @@ export class GameScene extends Phaser.Scene {
         raining: this.state.weather === 'rain',
         night: this.state.flow.phase === 'chicken-night',
       });
-      this.advanceChickenWorld(dt * 0.35);
-      this.updateChickenPressure(dt);
-      this.updateRealtimeThreats(dt);
+      this.advanceChickenWorld(activeSeconds);
+      this.updateChickenPressure(activeSeconds);
+      this.updateRealtimeThreats(activeSeconds);
       return;
     }
     if (
@@ -833,18 +840,27 @@ export class GameScene extends Phaser.Scene {
     const inShade =
       isShadowy(this.state.chicken) ||
       ownedFacilityAt(this.state.yard, this.state.chicken) === 'shade-shelter';
-    advanceChickenHeat(this.state, dt, {
-      sprinting: canSprint,
-      moving: hasMove,
-      inShade,
-      drinking: false,
-      raining: this.state.weather === 'rain',
-      night: this.state.flow.phase === 'chicken-night',
-    });
+    if (actionSeconds > 0) {
+      this.updateMovingFoods(actionSeconds);
+      if (updateWeatherExposure(this.state, actionSeconds)) {
+        this.state.message = '雨水把泥地打湿了，鸡爪和腹羽都沾上了一点泥。';
+      }
+      const heatSeconds = Math.max(0, actionSeconds - (drinking ? dt : 0));
+      if (heatSeconds > 0) {
+        advanceChickenHeat(this.state, heatSeconds, {
+          sprinting: canSprint,
+          moving: hasMove,
+          inShade,
+          drinking: false,
+          raining: this.state.weather === 'rain',
+          night: this.state.flow.phase === 'chicken-night',
+        });
+      }
 
-    this.advanceChickenWorld(Math.max(actionSeconds, dt));
-    this.updateChickenPressure(dt);
-    if (this.updateRealtimeThreats(dt)) return;
+      this.advanceChickenWorld(actionSeconds);
+      this.updateChickenPressure(actionSeconds);
+      if (this.updateRealtimeThreats(actionSeconds)) return;
+    }
   }
 
   private updateChickenPressure(dt: number) {
@@ -1011,7 +1027,10 @@ export class GameScene extends Phaser.Scene {
   private advanceChickenWorld(actionSeconds: number) {
     if (actionSeconds <= 0) return;
     const previousCheckpoint = this.state.finaleCheckpointJson;
-    applyFlowEvent(this.state, { type: 'tick', amount: actionSeconds / 155 });
+    applyFlowEvent(this.state, {
+      type: 'tick',
+      amount: actionSeconds / DAY_ACTIVE_SECONDS,
+    });
     if (!previousCheckpoint && this.state.finaleCheckpointJson) this.saveGame(true);
     const foodUpdate = expireFoods(this.state);
     for (const expiredId of foodUpdate.expiredIds) {

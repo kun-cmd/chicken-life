@@ -25,5 +25,5 @@ test('restore fills missing profile fields safely', () => {
   const restored = restoreGameState({ day: 3, profile: { name: '点点', named: true } });
   assert.equal(restored.profile.name, '点点');
   assert.equal(restored.profile.awakenedAbilities.peck, true);
-  assert.equal(restored.profile.awakenedAbilities.sprint, false);
+  assert.equal(restored.profile.awakenedAbilities.sprint, true);
 });

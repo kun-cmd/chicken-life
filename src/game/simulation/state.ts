@@ -44,6 +44,8 @@ import {
 import {
   activeActor,
   createDayFlow,
+  DAY_ACTIVE_SECONDS,
+  DUSK_AT,
   reduceDayFlow,
   type DayFlowEvent,
   type DayFlowState,
@@ -95,6 +97,7 @@ import {
 } from '../systems/finale';
 import {
   advanceHeat,
+  BODY_COMFORT_TUNING,
   sprintScaleForHeat,
   type HeatContext,
 } from '../systems/bodyComfort';
@@ -374,7 +377,7 @@ export interface HudSnapshot {
   reward: { title: string; name: string; effect: string } | null;
 }
 
-const DAY_SECONDS = 155;
+const DAY_SECONDS = DAY_ACTIVE_SECONDS;
 const DUSK_START = 0.58;
 const NIGHT_START = 0.82;
 const KEEPER_FEED_END = 0.25;
@@ -391,11 +394,14 @@ const CAT_VISIT_CHANCE = 0.5;
 const KEEPER_RESCUE_AFFECTION = 60;
 const KEEPER_SWIFT_RESCUE_AFFECTION = 85;
 export const CORE_LOOP_TUNING = {
-  duskPressurePerSecond: 1.8,
-  nightPressurePerSecond: 4.8,
-  distancePressureBonus: 8,
-  shadowPressureBonus: 3,
-  offPathPressureBonus: 2.2,
+  duskPressurePerActiveSecond: 0.18,
+  nightPressurePerActiveSecond: 0.42,
+  distancePressureBonus: 0.55,
+  shadowPressureBonus: 0.32,
+  offPathPressureBonus: 0.24,
+  lowStaminaPressureBonus: 1.2,
+  stuffedPressureBonus: 0.6,
+  couragePressureReduction: 0.06,
   porchLightReliefMin: 5,
   porchLightReliefMax: 6,
   waterBasinCapacity: 100,
@@ -685,12 +691,15 @@ export function updateNightPressure(state: GameState, context: PressureContext) 
   if (state.flow.phase !== 'chicken-dusk' && state.flow.phase !== 'chicken-night') return 0;
   const darkness = state.flow.phase === 'chicken-night' ? 1 : 0.38;
   const distanceToCoop = Math.min(distance(context.position, COOP_DOOR) / 780, 1);
-  const lowSprintRisk = context.staminaRatio < 0.2 ? (0.2 - context.staminaRatio) * 10 : 0;
-  const stuffedRisk = overstuffRatioFor(state) * 5.5;
+  const lowSprintRisk =
+    context.staminaRatio < 0.2
+      ? (0.2 - context.staminaRatio) * CORE_LOOP_TUNING.lowStaminaPressureBonus
+      : 0;
+  const stuffedRisk = overstuffRatioFor(state) * CORE_LOOP_TUNING.stuffedPressureBonus;
   const basePressure =
     state.flow.phase === 'chicken-night'
-      ? CORE_LOOP_TUNING.nightPressurePerSecond
-      : CORE_LOOP_TUNING.duskPressurePerSecond;
+      ? CORE_LOOP_TUNING.nightPressurePerActiveSecond
+      : CORE_LOOP_TUNING.duskPressurePerActiveSecond;
   let gain =
     basePressure +
     darkness *
@@ -701,7 +710,7 @@ export function updateNightPressure(state: GameState, context: PressureContext) 
 
   if (context.inShadow) gain += CORE_LOOP_TUNING.shadowPressureBonus * darkness;
   if (!context.onPath) gain += CORE_LOOP_TUNING.offPathPressureBonus * darkness;
-  const courageReduction = state.stats.courage * 0.9;
+  const courageReduction = state.stats.courage * CORE_LOOP_TUNING.couragePressureReduction;
   let nextPressure = clamp(state.nightPressure + (gain - courageReduction) * context.dt, 0, 100);
 
   let porchRelief = 0;
@@ -845,7 +854,11 @@ export function drinkAtWaterSource(state: GameState, dt: number) {
   const before = state.waterBoost;
   const drinkAmount = 42 * dt;
   state.waterBoost = clamp(state.waterBoost + drinkAmount, 0, WATER_BOOST_LIMIT);
-  state.heat = clamp(state.heat - 32 * dt, 0, 100);
+  state.heat = clamp(
+    state.heat - BODY_COMFORT_TUNING.waterCoolingPerActiveSecond * dt,
+    0,
+    100,
+  );
   if (atBasin) {
     state.waterBasinLevel = clamp(
       state.waterBasinLevel - CORE_LOOP_TUNING.waterBasinUsePerSecond * dt,
@@ -1835,6 +1848,7 @@ export function restoreGameState(saved: unknown): GameState {
     awakenedAbilities: {
       ...fresh.profile.awakenedAbilities,
       ...(input.profile?.awakenedAbilities ?? {}),
+      sprint: true,
     },
   };
   const defaultWeatherCalendar = createWeatherCalendar(
@@ -2080,7 +2094,7 @@ export function debugSetDay(state: GameState, requestedDay: number) {
   state.finaleCheckpointJson = null;
   state.stormActive = false;
   if (day >= 4) state.profile.awakenedAbilities.scratch = true;
-  if (day >= 5) state.profile.awakenedAbilities.sprint = true;
+  state.profile.awakenedAbilities.sprint = true;
   if (day >= 7) state.profile.awakenedAbilities.flutter = true;
 
   const egg = createMorningEggForDay(state, day, 'balanced');
@@ -2221,7 +2235,7 @@ function spawnDailyFood(state: GameState) {
     2,
   );
   for (const food of nightPlan) {
-    const nightBug = spawnFood(state, food.type, food, NIGHT_START);
+    const nightBug = spawnFood(state, food.type, food, DUSK_AT);
     nightBug.buried = true;
   }
 }

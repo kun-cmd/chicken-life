@@ -9,27 +9,27 @@ export interface HeatContext {
 
 export const BODY_COMFORT_TUNING = {
   maxHeat: 100,
-  sunnyIdleHeatPerSecond: 1.2,
-  movingHeatPerSecond: 1.8,
-  sprintHeatPerSecond: 17,
-  shadeCoolingPerSecond: 7,
-  rainCoolingPerSecond: 4,
-  waterCoolingPerSecond: 32,
-  passiveCoolingPerSecond: 1.6,
+  sunnyHeatPerActiveSecond: 0.8,
+  movingHeatPerActiveSecond: 1.2,
+  sprintHeatPerActiveSecond: 10,
+  shadeCoolingPerActiveSecond: 4.5,
+  rainCoolingPerActiveSecond: 2.4,
+  waterCoolingPerActiveSecond: 24,
+  passiveCoolingPerActiveSecond: 1.2,
   sprintPenaltyStartsAt: 65,
   minimumSprintScale: 0.55,
 } as const;
 
 export function advanceHeat(current: number, dt: number, context: HeatContext) {
   const seconds = Math.max(0, dt);
-  let change = context.night ? 0 : BODY_COMFORT_TUNING.sunnyIdleHeatPerSecond;
+  let change = context.night ? 0 : BODY_COMFORT_TUNING.sunnyHeatPerActiveSecond;
 
-  if (context.moving) change += BODY_COMFORT_TUNING.movingHeatPerSecond;
-  if (context.sprinting) change += BODY_COMFORT_TUNING.sprintHeatPerSecond;
-  if (!context.moving) change -= BODY_COMFORT_TUNING.passiveCoolingPerSecond;
-  if (context.inShade) change -= BODY_COMFORT_TUNING.shadeCoolingPerSecond;
-  if (context.raining) change -= BODY_COMFORT_TUNING.rainCoolingPerSecond;
-  if (context.drinking) change -= BODY_COMFORT_TUNING.waterCoolingPerSecond;
+  if (context.moving) change += BODY_COMFORT_TUNING.movingHeatPerActiveSecond;
+  if (context.sprinting) change += BODY_COMFORT_TUNING.sprintHeatPerActiveSecond;
+  if (!context.moving) change -= BODY_COMFORT_TUNING.passiveCoolingPerActiveSecond;
+  if (context.inShade) change -= BODY_COMFORT_TUNING.shadeCoolingPerActiveSecond;
+  if (context.raining) change -= BODY_COMFORT_TUNING.rainCoolingPerActiveSecond;
+  if (context.drinking) change -= BODY_COMFORT_TUNING.waterCoolingPerActiveSecond;
 
   return clamp(current + change * seconds, 0, BODY_COMFORT_TUNING.maxHeat);
 }
