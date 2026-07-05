@@ -1,18 +1,11 @@
 import { createSeededRandom } from './seededRandom';
 
-const MIDDLE_PAIRS: Array<[number, number]> = [
-  [9, 11],
-  [9, 12],
-  [9, 13],
-  [10, 12],
-  [10, 13],
-  [11, 13],
-];
-
 export function createWeaselSchedule(runSeed: number) {
   const random = createSeededRandom(runSeed ^ 0x51a5e1);
-  const pair = MIDDLE_PAIRS[Math.floor(random() * MIDDLE_PAIRS.length)];
-  return [8, ...pair, 14].sort((a, b) => a - b);
+  const early = 4 + Math.floor(random() * 2);
+  const middle = 7 + Math.floor(random() * 3);
+  const late = 10 + Math.floor(random() * 3);
+  return [2, early, middle, late, 14].sort((a, b) => a - b);
 }
 
 export function hasWeaselEncounter(schedule: number[], day: number, runSeed: number) {

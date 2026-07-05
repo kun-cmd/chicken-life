@@ -75,6 +75,10 @@ const hud = {
   woodLabel: document.querySelector<HTMLElement>('#woodLabel')!,
   sprintWrap: document.querySelector<HTMLElement>('#sprintWrap')!,
   staminaMeter: document.querySelector<HTMLElement>('#staminaMeter')!,
+  heatWrap: document.querySelector<HTMLElement>('#heatWrap')!,
+  heatMeter: document.querySelector<HTMLElement>('#heatMeter')!,
+  pressureWrap: document.querySelector<HTMLElement>('#pressureWrap')!,
+  pressureMeter: document.querySelector<HTMLElement>('#pressureMeter')!,
   contextPrompt: document.querySelector<HTMLElement>('#contextPrompt')!,
   toast: document.querySelector<HTMLElement>('#toast')!,
   rewardPanel: document.querySelector<HTMLElement>('#rewardPanel')!,
@@ -85,6 +89,8 @@ const hud = {
   debugClose: document.querySelector<HTMLButtonElement>('#debugClose')!,
   debugDay: document.querySelector<HTMLInputElement>('#debugDay')!,
   debugSetDay: document.querySelector<HTMLButtonElement>('#debugSetDay')!,
+  debugAffection: document.querySelector<HTMLInputElement>('#debugAffection')!,
+  debugAffectionLabel: document.querySelector<HTMLElement>('#debugAffectionLabel')!,
   masterVolume: document.querySelector<HTMLInputElement>('#masterVolume')!,
   masterVolumeLabel: document.querySelector<HTMLElement>('#masterVolumeLabel')!,
 };
@@ -158,7 +164,15 @@ function renderHud(snapshot: HudSnapshot) {
   hud.woodLabel.textContent = String(snapshot.wood);
   hud.sprintWrap.hidden = !snapshot.showSprint;
   hud.staminaMeter.style.width = `${snapshot.staminaPct}%`;
+  hud.heatWrap.hidden = !snapshot.showHeat;
+  hud.heatMeter.style.width = `${snapshot.heatPct}%`;
+  hud.pressureWrap.hidden = !snapshot.showPressure;
+  hud.pressureMeter.style.width = `${snapshot.pressurePct}%`;
   hud.contextPrompt.textContent = snapshot.contextPrompt;
+  if (document.activeElement !== hud.debugAffection) {
+    hud.debugAffection.value = String(snapshot.affection);
+  }
+  hud.debugAffectionLabel.textContent = String(snapshot.affection);
   if (yardPanelOpen) renderYardPanel(snapshot);
   renderEnding(snapshot);
 
@@ -226,8 +240,8 @@ function renderYardPanel(snapshot: HudSnapshot) {
   const pending = snapshot.yard.pendingWood;
   hud.yardWoodSummary.textContent =
     pending > 0
-      ? `现有木料 ${snapshot.yard.wood} · 明早送到 ${pending}`
-      : `现有木料 ${snapshot.yard.wood}`;
+      ? `院子预算 ${snapshot.yard.wood} · 待结算 ${pending}`
+      : `院子预算 ${snapshot.yard.wood}`;
 
   hud.eggAlbumList.replaceChildren();
   if (snapshot.eggArchive.length === 0) {
@@ -254,11 +268,16 @@ function renderYardPanel(snapshot: HudSnapshot) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'upgrade-choice';
-    button.disabled = owned || snapshot.yard.wood < upgrade.cost;
+    button.disabled =
+      owned ||
+      snapshot.yard.wood < upgrade.cost ||
+      snapshot.storyPhase !== 'morning-human';
     button.dataset.owned = owned ? 'true' : 'false';
 
     const heading = document.createElement('strong');
-    heading.textContent = owned ? `${upgrade.name} · 已完成` : `${upgrade.name} · ${upgrade.cost} 木料`;
+    heading.textContent = owned
+      ? `${upgrade.name} · 已拥有`
+      : `${upgrade.name} · ${upgrade.cost} 预算`;
     const effect = document.createElement('span');
     effect.textContent = upgrade.effect;
     button.append(heading, effect);
@@ -388,6 +407,11 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('[data-debug]'
 hud.debugSetDay.addEventListener('click', () => {
   dispatchDebug('setDay', { day: Number(hud.debugDay.value) });
 });
+hud.debugAffection.addEventListener('input', () => {
+  const affection = Math.max(0, Math.min(100, Math.round(Number(hud.debugAffection.value))));
+  hud.debugAffectionLabel.textContent = String(affection);
+  dispatchDebug('setAffection', { affection });
+});
 
 window.addEventListener('keydown', (event) => {
   if (
@@ -418,7 +442,11 @@ window.addEventListener('keydown', (event) => {
 function setDebugOpen(open: boolean) {
   debugOpen = open;
   hud.debugPanel.hidden = !open;
-  if (open && latestSnapshot) hud.debugDay.value = String(latestSnapshot.day);
+  if (open && latestSnapshot) {
+    hud.debugDay.value = String(latestSnapshot.day);
+    hud.debugAffection.value = String(latestSnapshot.affection);
+    hud.debugAffectionLabel.textContent = String(latestSnapshot.affection);
+  }
 }
 
 function dispatchDebug(action: string, detail: Record<string, unknown> = {}) {

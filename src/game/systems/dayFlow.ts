@@ -2,6 +2,7 @@ export type StoryPhase =
   | 'morning-human'
   | 'chicken-day'
   | 'chicken-dusk'
+  | 'chicken-night'
   | 'dusk-human'
   | 'night-result'
   | 'epilogue-human'
@@ -21,6 +22,7 @@ export type DayFlowEvent =
   | { type: 'return-home' }
   | { type: 'tick'; amount: number }
   | { type: 'call-human' }
+  | { type: 'settle-for-night' }
   | { type: 'chicken-entered-coop' }
   | { type: 'close-door' }
   | { type: 'next-morning' }
@@ -29,6 +31,7 @@ export type DayFlowEvent =
   | { type: 'continue-free-play' };
 
 const DUSK_AT = 0.65;
+const NIGHT_AT = 0.82;
 
 export function createDayFlow(overrides: Partial<DayFlowState> = {}): DayFlowState {
   return {
@@ -46,7 +49,9 @@ export function activeActor(phase: StoryPhase): 'human' | 'chicken' | 'none' {
   if (phase === 'morning-human' || phase === 'dusk-human' || phase === 'epilogue-human') {
     return 'human';
   }
-  if (phase === 'chicken-day' || phase === 'chicken-dusk') return 'chicken';
+  if (phase === 'chicken-day' || phase === 'chicken-dusk' || phase === 'chicken-night') {
+    return 'chicken';
+  }
   return 'none';
 }
 
@@ -69,9 +74,29 @@ export function reduceDayFlow(state: DayFlowState, event: DayFlowEvent): DayFlow
   }
 
   if (event.type === 'tick') {
-    if (state.phase !== 'chicken-day' && state.phase !== 'chicken-dusk') return state;
+    if (
+      state.phase !== 'chicken-day' &&
+      state.phase !== 'chicken-dusk' &&
+      state.phase !== 'chicken-night'
+    ) {
+      return state;
+    }
     const clock = Math.min(1, state.clock + Math.max(0, event.amount));
-    return { ...state, clock, phase: clock >= DUSK_AT ? 'chicken-dusk' : 'chicken-day' };
+    const phase =
+      clock >= NIGHT_AT ? 'chicken-night' : clock >= DUSK_AT ? 'chicken-dusk' : 'chicken-day';
+    return { ...state, clock, phase };
+  }
+
+  if (event.type === 'settle-for-night') {
+    if (state.phase !== 'chicken-dusk' && state.phase !== 'chicken-night') {
+      throw new Error('Settling for night requires chicken dusk or night');
+    }
+    return {
+      ...state,
+      phase: 'night-result',
+      chickenInCoop: true,
+      coopDoorClosed: true,
+    };
   }
 
   if (event.type === 'call-human') {

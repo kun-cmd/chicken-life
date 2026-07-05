@@ -14,9 +14,10 @@ import {
   startFacilityActivity,
 } from '../src/game/systems/yardUpgrades';
 
-test('all six upgrades cost twelve wood in total', () => {
-  assert.equal(YARD_UPGRADES.length, 6);
-  assert.equal(YARD_UPGRADES.reduce((sum, item) => sum + item.cost, 0), 12);
+test('core-loop upgrades use the approved dynamic-budget prices', () => {
+  assert.equal(YARD_UPGRADES.find((item) => item.id === 'yard-lamp')?.cost, 2);
+  assert.equal(YARD_UPGRADES.find((item) => item.id === 'water-basin')?.cost, 3);
+  assert.equal(YARD_UPGRADES.find((item) => item.id === 'coop-roof')?.cost, 5);
 });
 
 test('delivers pending wood at the next morning', () => {
@@ -31,8 +32,8 @@ test('buys each upgrade once without negative wood', () => {
   state.wood = 3;
   assert.equal(buyUpgrade(state, 'yard-lamp'), true);
   assert.equal(buyUpgrade(state, 'yard-lamp'), false);
-  assert.equal(buyUpgrade(state, 'door-latch'), false);
-  assert.equal(state.wood, 0);
+  assert.equal(buyUpgrade(state, 'water-basin'), false);
+  assert.equal(state.wood, 1);
 });
 
 test('coop upgrades ease the dusk ritual without replacing it', () => {

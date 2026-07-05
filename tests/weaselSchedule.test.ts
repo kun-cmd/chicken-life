@@ -5,16 +5,18 @@ import {
   hasWeaselEncounter,
 } from '../src/game/systems/weaselSchedule';
 
-test('always includes the teaching and finale days', () => {
+test('always includes an early encounter and the finale day', () => {
   const schedule = createWeaselSchedule(1);
-  assert.equal(hasWeaselEncounter(schedule, 8, 1), true);
+  assert.equal(hasWeaselEncounter(schedule, 2, 1), true);
   assert.equal(hasWeaselEncounter(schedule, 14, 1), true);
 });
 
-test('chooses exactly two nonconsecutive random days from nine through thirteen', () => {
-  const middle = createWeaselSchedule(25).filter((day) => day >= 9 && day <= 13);
-  assert.equal(middle.length, 2);
-  assert.ok(Math.abs(middle[0] - middle[1]) > 1);
+test('spreads seeded encounters across early, middle, and late play', () => {
+  const schedule = createWeaselSchedule(25);
+  assert.equal(schedule.length, 5);
+  assert.ok(schedule.some((day) => day >= 4 && day <= 5));
+  assert.ok(schedule.some((day) => day >= 7 && day <= 9));
+  assert.ok(schedule.some((day) => day >= 10 && day <= 12));
 });
 
 test('is stable for the same seed', () => {

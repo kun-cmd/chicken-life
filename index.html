@@ -97,14 +97,14 @@
         <div class="panel-head">
           <div>
             <span>小院手记</span>
-            <h2 id="yardPanelTitle">蛋相册与修缮</h2>
+            <h2 id="yardPanelTitle">蛋相册与院子道具</h2>
           </div>
           <button id="yardPanelClose" type="button" aria-label="关闭小院手记">×</button>
         </div>
-        <p id="yardWoodSummary" class="yard-panel__wood">现有木料 0</p>
+        <p id="yardWoodSummary" class="yard-panel__wood">院子预算 0</p>
         <h3>蛋相册</h3>
         <div id="eggAlbumList" class="panel-list"></div>
-        <h3>修缮</h3>
+        <h3>可购买道具</h3>
         <div id="upgradeChoices" class="upgrade-grid"></div>
         <p class="yard-panel__hint">Tab 打开 · Esc 关闭</p>
       </section>
@@ -129,12 +129,20 @@
 
         <section class="minimal-hud">
           <div class="wood-chip">
-            <span>修缮木料</span>
+            <span>院子预算</span>
             <b id="woodLabel">0</b>
           </div>
           <div id="sprintWrap" class="sprint-wrap" hidden>
             <span>冲刺劲</span>
             <div class="meter-track"><i id="staminaMeter"></i></div>
+          </div>
+          <div id="heatWrap" class="sprint-wrap heat-wrap" hidden>
+            <span>体热</span>
+            <div class="meter-track"><i id="heatMeter"></i></div>
+          </div>
+          <div id="pressureWrap" class="sprint-wrap pressure-wrap" hidden>
+            <span>夜压</span>
+            <div class="meter-track"><i id="pressureMeter"></i></div>
           </div>
         </section>
 
@@ -153,7 +161,7 @@
             <button id="debugClose" type="button">×</button>
           </div>
           <div class="debug-actions">
-            <button type="button" data-debug="addMaterials">补充木料</button>
+            <button type="button" data-debug="addMaterials">补充预算</button>
             <button type="button" data-debug="jumpDusk">跳黄昏</button>
             <button type="button" data-debug="skipPhase">跳过此阶段</button>
             <button type="button" data-debug="spawnWeasel">生成黄鼠狼</button>
@@ -163,6 +171,11 @@
             <span>调整天数</span>
             <input id="debugDay" type="number" min="1" max="999" step="1" value="1" />
             <button id="debugSetDay" type="button">设置</button>
+          </label>
+          <label class="debug-affection">
+            <span>当前亲密度</span>
+            <input id="debugAffection" type="range" min="0" max="100" step="1" value="12" />
+            <b id="debugAffectionLabel">12</b>
           </label>
           <label class="debug-volume">
             <span>总音量</span>

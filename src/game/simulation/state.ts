@@ -18,7 +18,11 @@ import {
   isOnPath,
 } from '../content/yard';
 import { EGG_SPOTS, selectEggSpot } from '../content/eggSpots';
-import { YARD_LAMP_POSITION } from '../content/yardUpgrades';
+import {
+  PREMIUM_FEED_POSITION,
+  WATER_BASIN_POSITION,
+  YARD_LAMP_POSITION,
+} from '../content/yardUpgrades';
 import {
   createChickenProfile,
   normalizeChickenName,
@@ -89,6 +93,16 @@ import {
   restoreFinaleCheckpoint,
   shouldStartFinale,
 } from '../systems/finale';
+import {
+  advanceHeat,
+  sprintScaleForHeat,
+  type HeatContext,
+} from '../systems/bodyComfort';
+import {
+  eggQualityLabel,
+  evaluateEggQuality,
+  type EggQuality,
+} from '../systems/eggEconomy';
 
 export type Phase = 'day' | 'dusk' | 'night' | 'human';
 export type PlayerMode = 'chicken' | 'human';
@@ -139,6 +153,7 @@ export interface FoodEntity extends Vec2 {
   freshUntil?: number;
   fromKeeper?: boolean;
   velocity?: Vec2;
+  buried?: boolean;
 }
 
 export interface HoleEntity extends Vec2 {
@@ -152,6 +167,8 @@ export interface EggEntity extends Vec2 {
   name: string;
   effect: string;
   found: boolean;
+  quality: EggQuality;
+  budget: number;
 }
 
 export interface EggArchiveEntry {
@@ -234,6 +251,7 @@ export interface GameState {
   carryingChicken: boolean;
   time: number;
   nightPressure: number;
+  heat: number;
   nutrition: number;
   waterBoost: number;
   affection: number;
@@ -250,6 +268,10 @@ export interface GameState {
   repairedToday: boolean;
   keeperRescueUsedToday: boolean;
   drankToday: boolean;
+  premiumFeedServedToday: boolean;
+  waterBasinLevel: number;
+  dryRestTonight: boolean;
+  porchLightReliefUsed: boolean;
   holesDugToday: number;
   lightPressureUsed: number[];
   chicken: Vec2;
@@ -325,6 +347,10 @@ export interface HudSnapshot {
   digLimit: number;
   pressure: number;
   pressurePct: number;
+  heat: number;
+  heatPct: number;
+  showHeat: boolean;
+  showPressure: boolean;
   affection: number;
   affectionPct: number;
   coopSafety: number;
@@ -337,6 +363,8 @@ export interface HudSnapshot {
   upgrades: string[];
   eggArchive: EggArchiveEntry[];
   yard: YardUpgradeState;
+  currentEggQuality: EggQuality | null;
+  currentEggBudget: number;
   daySummary: DaySummary | null;
   goalTip: string;
   forcedEggType: EggType | null;
@@ -348,7 +376,7 @@ export interface HudSnapshot {
 
 const DAY_SECONDS = 155;
 const DUSK_START = 0.58;
-const NIGHT_START = 0.76;
+const NIGHT_START = 0.82;
 const KEEPER_FEED_END = 0.25;
 const COMFORT_FULLNESS = 72;
 const FULLNESS_LIMIT = 100;
@@ -362,6 +390,18 @@ const CAT_END = 0.58;
 const CAT_VISIT_CHANCE = 0.5;
 const KEEPER_RESCUE_AFFECTION = 60;
 const KEEPER_SWIFT_RESCUE_AFFECTION = 85;
+export const CORE_LOOP_TUNING = {
+  duskPressurePerSecond: 1.8,
+  nightPressurePerSecond: 4.8,
+  distancePressureBonus: 8,
+  shadowPressureBonus: 3,
+  offPathPressureBonus: 2.2,
+  porchLightReliefMin: 5,
+  porchLightReliefMax: 6,
+  waterBasinCapacity: 100,
+  waterBasinUsePerSecond: 9,
+  premiumFeedPieces: 3,
+} as const;
 const LIGHT_PRESSURE_BUDGET = 4;
 const WORM_VISIBLE_MIN = 0.1;
 const WORM_VISIBLE_RANDOM = 0.06;
@@ -376,6 +416,8 @@ function createTutorialEgg(): EggEntity {
     name: '第一枚蛋',
     effect: '找到蛋后，才放心把鸡放进院子。',
     found: false,
+    quality: 'poor',
+    budget: 2,
   };
 }
 
@@ -402,6 +444,7 @@ export function createGameState(): GameState {
     carryingChicken: false,
     time: 0.08,
     nightPressure: 0,
+    heat: 0,
     nutrition: 0,
     waterBoost: 0,
     affection: 12,
@@ -418,6 +461,10 @@ export function createGameState(): GameState {
     repairedToday: false,
     keeperRescueUsedToday: false,
     drankToday: false,
+    premiumFeedServedToday: false,
+    waterBasinLevel: 0,
+    dryRestTonight: true,
+    porchLightReliefUsed: false,
     holesDugToday: 0,
     lightPressureUsed: freshLightPressureUsed(),
     chicken: { x: COOP_DOOR.x, y: COOP_DOOR.y + 32 },
@@ -430,9 +477,9 @@ export function createGameState(): GameState {
     },
     keeper: {
       ...KEEPER_START,
-      active: true,
+      active: false,
       returning: false,
-      doneFeeding: false,
+      doneFeeding: true,
       rescuing: false,
       routeIndex: 1,
       scatterCooldown: 1.6,
@@ -512,7 +559,6 @@ export function applyFlowEvent(state: GameState, event: DayFlowEvent) {
   ) {
     state.stormActive = true;
     state.finaleCheckpointJson = captureFinaleCheckpoint(state);
-    state.message = '暴风压进小院。今晚若没能安全关门，会从这一刻重新来过。';
   }
   if (
     !state.freePlay &&
@@ -589,6 +635,14 @@ export function spawnScratchWorm(state: GameState, position: Vec2) {
   return worm;
 }
 
+export function revealBuriedNightBug(state: GameState, food: FoodEntity) {
+  if (food.type !== 'nightBug' || !food.buried) return false;
+  food.buried = false;
+  state.nightPressure = clamp(state.nightPressure + 4, 0, 100);
+  state.message = '泥土裂开，月光虫钻了出来；刨土声也让远处草丛动了一下。';
+  return true;
+}
+
 function syncLegacyPhaseFromFlow(state: GameState) {
   const actor = activeActor(state.flow.phase);
   state.mode = actor === 'none' ? state.mode : actor;
@@ -599,6 +653,8 @@ function syncLegacyPhaseFromFlow(state: GameState) {
       ? 'human'
       : state.flow.phase === 'chicken-dusk'
         ? 'dusk'
+        : state.flow.phase === 'chicken-night'
+          ? 'night'
         : state.flow.phase === 'night-result'
           ? 'night'
           : 'day';
@@ -626,38 +682,56 @@ export function advanceChickenTime(state: GameState, dt: number) {
 }
 
 export function updateNightPressure(state: GameState, context: PressureContext) {
-  if (state.flow.phase !== 'chicken-dusk' && state.flow.phase !== 'dusk-human') return;
-  const darkness =
-    state.phase === 'night' ? 1 : state.flow.phase === 'chicken-dusk' || state.flow.phase === 'dusk-human' ? 0.48 : 0;
+  if (state.flow.phase !== 'chicken-dusk' && state.flow.phase !== 'chicken-night') return 0;
+  const darkness = state.flow.phase === 'chicken-night' ? 1 : 0.38;
   const distanceToCoop = Math.min(distance(context.position, COOP_DOOR) / 780, 1);
   const lowSprintRisk = context.staminaRatio < 0.2 ? (0.2 - context.staminaRatio) * 10 : 0;
   const stuffedRisk = overstuffRatioFor(state) * 5.5;
-  let gain = darkness * (4.8 + distanceToCoop * 8 + stuffedRisk + lowSprintRisk - state.coopSafety * 0.45);
+  const basePressure =
+    state.flow.phase === 'chicken-night'
+      ? CORE_LOOP_TUNING.nightPressurePerSecond
+      : CORE_LOOP_TUNING.duskPressurePerSecond;
+  let gain =
+    basePressure +
+    darkness *
+      (distanceToCoop * CORE_LOOP_TUNING.distancePressureBonus +
+        stuffedRisk +
+        lowSprintRisk -
+        state.coopSafety * 0.45);
 
-  if (context.inShadow) gain += 3 * darkness;
-  if (!context.onPath) gain += 2.2 * darkness;
-  if (context.nearLight && state.flow.phase === 'dusk-human') gain *= 0.5;
+  if (context.inShadow) gain += CORE_LOOP_TUNING.shadowPressureBonus * darkness;
+  if (!context.onPath) gain += CORE_LOOP_TUNING.offPathPressureBonus * darkness;
   const courageReduction = state.stats.courage * 0.9;
   let nextPressure = clamp(state.nightPressure + (gain - courageReduction) * context.dt, 0, 100);
 
-  if (context.nearLight) {
-    const lightIndex = usableLightIndexFor(state, context.position);
-    if (lightIndex >= 0) {
-      const used = state.lightPressureUsed[lightIndex] ?? 0;
-      const remaining = Math.max(0, LIGHT_PRESSURE_BUDGET - used);
-      const reduction = Math.min(nextPressure, remaining, lightPressureRateFor(state.stats.lamp) * context.dt);
-      if (reduction > 0) {
-        nextPressure = clamp(nextPressure - reduction, 0, 100);
-        state.lightPressureUsed[lightIndex] = clamp(used + reduction, 0, LIGHT_PRESSURE_BUDGET);
-      }
-    }
+  let porchRelief = 0;
+  const nearOwnedPorchLight =
+    state.yard.owned.includes('yard-lamp') &&
+    distance(context.position, YARD_LAMP_POSITION) < lightRadiusFor(state.stats.lamp);
+  if (
+    state.flow.phase === 'chicken-night' &&
+    nearOwnedPorchLight &&
+    !state.porchLightReliefUsed
+  ) {
+    const reliefSpan =
+      CORE_LOOP_TUNING.porchLightReliefMax - CORE_LOOP_TUNING.porchLightReliefMin + 1;
+    porchRelief =
+      CORE_LOOP_TUNING.porchLightReliefMin +
+      (Math.abs(state.profile.runSeed + state.day) % reliefSpan);
+    nextPressure = clamp(nextPressure - porchRelief, 0, 100);
+    state.porchLightReliefUsed = true;
+    state.message = `门外的暖光让${state.profile.name}松了口气，夜压降低 ${porchRelief}。`;
   }
 
   state.nightPressure = nextPressure;
+  return porchRelief;
 }
 
 export function eatFood(state: GameState, food: FoodEntity) {
   state.eaten[food.type] = (state.eaten[food.type] ?? 0) + 1;
+  const fullnessGain = fullnessGainFor(state, food);
+  state.stats.fullness = clamp(state.stats.fullness + fullnessGain, 0, FULLNESS_LIMIT);
+  state.nutrition = clamp(state.nutrition + fullnessGain, 0, FULLNESS_LIMIT);
   let discovery: ReturnType<typeof consumeFood> | null = null;
   if (isForagingFood(food.type)) {
     discovery = consumeFood(state.foraging, food.type);
@@ -740,6 +814,16 @@ export function waterBoostRatioFor(state: GameState) {
   return clamp(state.waterBoost / WATER_BOOST_LIMIT, 0, 1);
 }
 
+export function advanceChickenHeat(state: GameState, dt: number, context: HeatContext) {
+  if (state.mode !== 'chicken') return state.heat;
+  state.heat = advanceHeat(state.heat, dt, context);
+  return state.heat;
+}
+
+export function chickenSprintScaleForHeat(state: GameState) {
+  return sprintScaleForHeat(state.heat);
+}
+
 export function digLimitFor(state: GameState) {
   return 1;
 }
@@ -749,13 +833,26 @@ export function updateWaterBoost(state: GameState, actionSeconds: number) {
   state.waterBoost = clamp(state.waterBoost - WATER_BOOST_DECAY * actionSeconds, 0, WATER_BOOST_LIMIT);
 }
 
-export function drinkAtPond(state: GameState, dt: number) {
+export function drinkAtWaterSource(state: GameState, dt: number) {
   if (state.mode !== 'chicken') return false;
-  if (!isNearPond(state.chicken)) return false;
+  const atPond = isNearPond(state.chicken);
+  const atBasin =
+    state.yard.owned.includes('water-basin') &&
+    distance(state.chicken, WATER_BASIN_POSITION) < 58 &&
+    state.waterBasinLevel > 0;
+  if (!atPond && !atBasin) return false;
 
   const before = state.waterBoost;
   const drinkAmount = 42 * dt;
   state.waterBoost = clamp(state.waterBoost + drinkAmount, 0, WATER_BOOST_LIMIT);
+  state.heat = clamp(state.heat - 32 * dt, 0, 100);
+  if (atBasin) {
+    state.waterBasinLevel = clamp(
+      state.waterBasinLevel - CORE_LOOP_TUNING.waterBasinUsePerSecond * dt,
+      0,
+      CORE_LOOP_TUNING.waterBasinCapacity,
+    );
+  }
   state.drankToday = true;
 
   if (!state.message) {
@@ -766,6 +863,41 @@ export function drinkAtPond(state: GameState, dt: number) {
     }
   }
   return true;
+}
+
+export function drinkAtPond(state: GameState, dt: number) {
+  return drinkAtWaterSource(state, dt);
+}
+
+export function refillWaterBasin(state: GameState) {
+  if (state.mode !== 'human' || !state.yard.owned.includes('water-basin')) return false;
+  state.waterBasinLevel = CORE_LOOP_TUNING.waterBasinCapacity;
+  state.message = '水盆装满了，清水够喝上好几次。';
+  return true;
+}
+
+export function servePremiumFeed(state: GameState) {
+  if (
+    state.mode !== 'human' ||
+    !state.yard.owned.includes('premium-feed') ||
+    state.premiumFeedServedToday
+  ) {
+    return [];
+  }
+  state.premiumFeedServedToday = true;
+  const foods = Array.from({ length: CORE_LOOP_TUNING.premiumFeedPieces }, (_, index) =>
+    spawnFood(
+      state,
+      'grain',
+      {
+        x: PREMIUM_FEED_POSITION.x + 32 + index * 17,
+        y: PREMIUM_FEED_POSITION.y + 34 + (index % 2) * 10,
+      },
+      state.time,
+    ),
+  );
+  state.message = '你从饲料桶舀出一勺，今天有一份稳稳的基础饱食。';
+  return foods;
 }
 
 export function updateKeeper(state: GameState, moveDt: number, clockDt = moveDt) {
@@ -1262,6 +1394,26 @@ export function finishChickenRun(state: GameState, caught: boolean) {
     : '鸡钻回笼里，咯咯地叫了起来。明早先去找蛋。';
 }
 
+export function finishChickenNight(state: GameState, caught = false) {
+  if (state.flow.phase !== 'chicken-dusk' && state.flow.phase !== 'chicken-night') {
+    return false;
+  }
+  state.caughtToday = caught;
+  state.dryRestTonight = state.weather !== 'rain' || state.yard.owned.includes('coop-roof');
+  if (!caught) recordTrustMemory(state.relationship, state.day, 'safe-close');
+  state.egg = createEgg(state);
+  state.reward = null;
+  state.daySummary = createDaySummary(state, 0);
+  state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 20 };
+  applyFlowEvent(state, { type: 'settle-for-night' });
+  state.message = caught
+    ? `${state.profile.name}丢下夜食，惊叫着逃回了鸡窝。明早还能从羽毛和蛋看见今晚的故事。`
+    : state.dryRestTonight
+      ? `${state.profile.name}自己钻进鸡窝，院子安静下来。`
+      : `雨从旧屋顶漏下来，${state.profile.name}缩成了一只湿漉漉的落汤鸡。`;
+  return true;
+}
+
 export function finishNightResult(state: GameState) {
   recordTrustMemory(state.relationship, state.day, 'safe-close');
   state.carryingChicken = false;
@@ -1293,10 +1445,17 @@ export function advanceNightResult(state: GameState) {
   const nextMorningEgg = state.egg;
   applyFlowEvent(state, { type: 'next-morning' });
   const deliveredWood = resetMorningState(state, nextMorningEgg);
-  state.message =
+  const baseMessage =
     deliveredWood > 0
       ? `清晨到了，昨天换回的 ${deliveredWood} 份木料已经送到。先去找今天的蛋。`
       : '清晨到了。先在院子里找到今天的蛋。';
+  const rainOffset = [1, 2].find(
+    (offset) => weatherForDay(state.profile.runSeed, state.day + offset) === 'rain',
+  );
+  state.message =
+    rainOffset === undefined
+      ? baseMessage
+      : `${baseMessage} 收音机说明${rainOffset === 1 ? '天' : '后天'}会有一场大雨。`;
 }
 
 export function startEpilogueMorning(state: GameState) {
@@ -1309,6 +1468,8 @@ export function startEpilogueMorning(state: GameState) {
     name: '温热的纪念蛋',
     effect: '这枚蛋记着两周以来的小院生活。',
     found: false,
+    quality: 'excellent',
+    budget: 5,
   };
   const deliveredWood = resetMorningState(state, keepsake);
   state.eggSearch = createEggSearchState(spot.id);
@@ -1379,6 +1540,7 @@ export function restoreFinaleState(checkpointJson: string) {
 function resetMorningState(state: GameState, nextMorningEgg: EggEntity | null) {
   const deliveredWood = deliverPendingWood(state.yard);
   state.nightPressure = 0;
+  state.heat = 0;
   state.nutrition = 0;
   state.waterBoost = 0;
   state.caughtToday = false;
@@ -1391,6 +1553,9 @@ function resetMorningState(state: GameState, nextMorningEgg: EggEntity | null) {
   state.weaselEncounterDoneToday = false;
   state.handLanternActive = false;
   state.drankToday = false;
+  state.premiumFeedServedToday = false;
+  state.dryRestTonight = true;
+  state.porchLightReliefUsed = false;
   state.holesDugToday = 0;
   resetFacilityLifeDay(state.facilityLife);
   state.weatherCalendar = createWeatherCalendar(
@@ -1405,9 +1570,9 @@ function resetMorningState(state: GameState, nextMorningEgg: EggEntity | null) {
   state.chickenWander = { target: null, wait: 0.4, pause: 0.2, facing: 1 };
   state.keeper = {
     ...KEEPER_START,
-    active: true,
+    active: false,
     returning: false,
-    doneFeeding: false,
+    doneFeeding: true,
     rescuing: false,
     routeIndex: 1,
     scatterCooldown: 1.6,
@@ -1439,14 +1604,15 @@ export function collectEgg(state: GameState) {
   state.egg.found = true;
   applyEggEffect(state, state.egg.type);
   rememberEgg(state, state.egg.type);
-  state.yard.pendingWood += 1;
+  const earnedBudget = state.egg.budget;
+  state.yard.wood += earnedBudget;
   state.previousEggSpotId = state.eggSearch.spotId;
   state.reward = {
     title: '找到鸡蛋',
     name: state.egg.name,
     effect: state.egg.effect,
   };
-  state.message = `${state.egg.name} 被捧起来换了 1 份木料，明早送到。还可以再照料鸡；准备好后回房门口按 E 回屋。`;
+  state.message = `${state.egg.name}是${eggQualityLabel(state.egg.quality)}，院子预算 +${earnedBudget}。还可以再照料鸡；准备好后回房门口按 E 回屋。`;
   return true;
 }
 
@@ -1454,6 +1620,7 @@ export function startNextDay(state: GameState) {
   applyFlowEvent(state, { type: 'next-morning' });
   deliverPendingWood(state.yard);
   state.nightPressure = 0;
+  state.heat = 0;
   state.nutrition = 0;
   state.waterBoost = 0;
   state.caughtToday = false;
@@ -1463,6 +1630,9 @@ export function startNextDay(state: GameState) {
   state.repairedToday = false;
   state.keeperRescueUsedToday = false;
   state.drankToday = false;
+  state.premiumFeedServedToday = false;
+  state.dryRestTonight = true;
+  state.porchLightReliefUsed = false;
   state.holesDugToday = 0;
   state.lightPressureUsed = freshLightPressureUsed();
   state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 32 };
@@ -1470,9 +1640,9 @@ export function startNextDay(state: GameState) {
   state.chickenWander = { target: null, wait: 0, pause: 0, facing: 1 };
   state.keeper = {
     ...KEEPER_START,
-    active: true,
+    active: false,
     returning: false,
-    doneFeeding: false,
+    doneFeeding: true,
     rescuing: false,
     routeIndex: 1,
     scatterCooldown: 1.6,
@@ -1530,6 +1700,11 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     digLimit: digLimitFor(state),
     pressure: Math.round(state.nightPressure),
     pressurePct: Math.round(state.nightPressure),
+    heat: Math.round(state.heat),
+    heatPct: Math.round(state.heat),
+    showHeat: state.mode === 'chicken',
+    showPressure:
+      state.flow.phase === 'chicken-dusk' || state.flow.phase === 'chicken-night',
     affection: Math.round(state.affection),
     affectionPct: Math.round(state.affection),
     coopSafety: state.coopSafety,
@@ -1546,6 +1721,8 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
       pendingWood: state.yard.pendingWood,
       owned: [...state.yard.owned],
     },
+    currentEggQuality: state.egg?.quality ?? null,
+    currentEggBudget: state.egg?.budget ?? 0,
     daySummary: state.daySummary ? { ...state.daySummary, eaten: { ...state.daySummary.eaten } } : null,
     goalTip: goalTipFor(state),
     forcedEggType: state.forcedEggType,
@@ -1615,10 +1792,15 @@ function goalTipFor(state: GameState) {
     if (state.flow.morningEggFound) return '还可以靠近鸡按 E 抱一抱，或去鸡窝修缮；准备好后到房门口按 E 回屋。';
     return '靠近鸡按 E 互动。';
   }
-  if (state.weaselEncounter) return '黄鼠狼靠近了：冲刺、跳上低处，或连续叫养鸡人出来。';
+  if (state.weaselEncounter) return '黄鼠狼靠近了：听草丛方向，沿熟悉路线冲回鸡窝。';
   if (tutorial) return tutorial.prompt;
-  if (state.flow.phase === 'chicken-dusk') return `连续咯咯叫几声，让屋里听见${state.profile.name}想回窝。`;
-  if (state.weasel.active) return '黄鼠狼来了：咯咯叫、冲刺躲开，等养鸡人赶来。';
+  if (state.flow.phase === 'chicken-dusk') {
+    return '天色正在变暗：到鸡窝门前按 E 可以休息，也可以留下等夜虫出现。';
+  }
+  if (state.flow.phase === 'chicken-night') {
+    return '夜里可在鼓动的泥土旁按住 E 挖月光虫；危险时回鸡窝门前按 E。';
+  }
+  if (state.weasel.active) return '黄鼠狼来了：沿熟悉路线冲回鸡窝。';
   const facility = ownedFacilityAt(state.yard, state.chicken);
   if (state.facilityLife.activity === 'dust-bath') return '正在松土里沙浴。';
   if (state.facilityLife.activity === 'shade-rest') return '正在遮阴棚下休息和梳理羽毛。';
@@ -1639,11 +1821,14 @@ export function restoreGameState(saved: unknown): GameState {
   const input = saved as Partial<GameState>;
   const hasSavedFlow = !!input.flow && typeof input.flow === 'object';
   const savedDay = Number(input.day);
-  const restoredFlow = createDayFlow(
+  let restoredFlow = createDayFlow(
     hasSavedFlow
       ? input.flow
       : { day: Number.isFinite(savedDay) && savedDay > 0 ? Math.floor(savedDay) : 1 },
   );
+  if (restoredFlow.phase === 'dusk-human') {
+    restoredFlow = { ...restoredFlow, phase: 'chicken-dusk' };
+  }
   const restoredProfile = {
     ...fresh.profile,
     ...(input.profile ?? {}),
@@ -1687,17 +1872,34 @@ export function restoreGameState(saved: unknown): GameState {
     closeInteractionUsedToday: input.closeInteractionUsedToday ?? false,
     carryingChicken: input.carryingChicken ?? false,
     saveAvailable: input.saveAvailable ?? true,
+    heat: Number.isFinite(input.heat) ? clamp(Number(input.heat), 0, 100) : 0,
+    premiumFeedServedToday: input.premiumFeedServedToday ?? false,
+    waterBasinLevel: Number.isFinite(input.waterBasinLevel)
+      ? clamp(
+          Number(input.waterBasinLevel),
+          0,
+          CORE_LOOP_TUNING.waterBasinCapacity,
+        )
+      : 0,
+    dryRestTonight: input.dryRestTonight ?? true,
+    porchLightReliefUsed: input.porchLightReliefUsed ?? false,
     chicken: { ...fresh.chicken, ...(input.chicken ?? {}) },
     human: { ...fresh.human, ...(input.human ?? {}) },
     chickenWander: { ...fresh.chickenWander, ...(input.chickenWander ?? {}) },
-    keeper: { ...fresh.keeper, ...(input.keeper ?? {}) },
+    keeper: {
+      ...fresh.keeper,
+      ...(input.keeper ?? {}),
+      active: false,
+      doneFeeding: true,
+      rescuing: false,
+    },
     lightPressureUsed: restoreLightPressureUsed(input.lightPressureUsed),
     stats: { ...fresh.stats, ...(input.stats ?? {}) },
     unlockedFoods: { ...fresh.unlockedFoods, ...(input.unlockedFoods ?? {}) },
     eaten: { ...fresh.eaten, ...(input.eaten ?? {}) },
     foods: Array.isArray(input.foods) ? input.foods.map((food) => restoreFood(food, fresh)) : fresh.foods,
     holes: Array.isArray(input.holes) ? input.holes : fresh.holes,
-    egg: input.egg ?? (hasSavedFlow ? null : createTutorialEgg()),
+    egg: restoreEgg(input.egg, hasSavedFlow),
     eggSearch: {
       ...fresh.eggSearch,
       ...(input.eggSearch ?? {}),
@@ -1792,6 +1994,26 @@ export function restoreGameState(saved: unknown): GameState {
   return restored;
 }
 
+function restoreEgg(
+  saved: Partial<EggEntity> | null | undefined,
+  hasSavedFlow: boolean,
+): EggEntity | null {
+  if (!saved) return hasSavedFlow ? null : createTutorialEgg();
+  const fallback = createTutorialEgg();
+  const quality = isEggQuality(saved.quality) ? saved.quality : 'poor';
+  const budget = Number(saved.budget);
+  return {
+    ...fallback,
+    ...saved,
+    quality,
+    budget: Number.isFinite(budget) ? clamp(Math.round(budget), 2, 5) : 2,
+  };
+}
+
+function isEggQuality(value: unknown): value is EggQuality {
+  return value === 'poor' || value === 'ordinary' || value === 'good' || value === 'excellent';
+}
+
 function restoreDaySummary(saved: Partial<DaySummary> | null | undefined): DaySummary | null {
   if (!saved) return null;
   const eggType = isEggType(saved.eggType) ? saved.eggType : 'cracked';
@@ -1842,7 +2064,7 @@ export function debugAddAffection(state: GameState, amount = 20) {
 
 export function debugAddMaterials(state: GameState, amount = 30) {
   state.yard.wood += amount;
-  state.message = `调试：木料 +${amount}，现在 ${state.yard.wood}。`;
+  state.message = `调试：院子预算 +${amount}，现在 ${state.yard.wood}。`;
 }
 
 export function debugSetDay(state: GameState, requestedDay: number) {
@@ -1869,7 +2091,11 @@ export function debugSetDay(state: GameState, requestedDay: number) {
 }
 
 export function debugJumpToDusk(state: GameState) {
-  if (state.flow.phase !== 'chicken-day' && state.flow.phase !== 'chicken-dusk') {
+  if (
+    state.flow.phase !== 'chicken-day' &&
+    state.flow.phase !== 'chicken-dusk' &&
+    state.flow.phase !== 'chicken-night'
+  ) {
     state.message = '调试：只有母鸡行动时才能跳到黄昏。';
     return false;
   }
@@ -1984,15 +2210,19 @@ function spawnDailyFood(state: GameState) {
   );
   for (const food of plan) spawnFood(state, food.type, food, 0);
 
-  if (state.profile.awakenedAbilities.sprint) {
-    const nightPlan = createDailyFoodPlan(
-      state.profile.runSeed ^ 0x51f15e,
-      state.day,
-      ['nightBug'],
-      FOOD_SPAWN_POINTS,
-      2,
-    );
-    for (const food of nightPlan) spawnFood(state, food.type, food, DUSK_START);
+  const nightBugPoints = FOOD_SPAWN_POINTS.filter(
+    (point) => point.x < 260 || point.x > WORLD_WIDTH - 260 || point.y > WORLD_HEIGHT - 170,
+  );
+  const nightPlan = createDailyFoodPlan(
+    state.profile.runSeed ^ 0x51f15e,
+    state.day,
+    ['nightBug'],
+    nightBugPoints,
+    2,
+  );
+  for (const food of nightPlan) {
+    const nightBug = spawnFood(state, food.type, food, NIGHT_START);
+    nightBug.buried = true;
   }
 }
 
@@ -2192,13 +2422,27 @@ function randomPlantPoint(): Vec2 {
 function createEgg(state: GameState): EggEntity {
   const type = state.forcedEggType ?? pickEggType(state);
   state.forcedEggType = null;
-  return createMorningEggForDay(state, state.day + 1, type);
+  const outcome = evaluateEggQuality({
+    fullness: state.nutrition,
+    foodsEaten: state.foraging.foodsEatenToday,
+    dryRest: state.dryRestTonight,
+    caught: state.caughtToday,
+  });
+  return createMorningEggForDay(
+    state,
+    state.day + 1,
+    type,
+    outcome.quality,
+    outcome.budget,
+  );
 }
 
 function createMorningEggForDay(
   state: GameState,
   eggDay: number,
   type: EggType,
+  quality: EggQuality = 'poor',
+  budget = 2,
 ): EggEntity {
   const eggInfo = eggCatalog[type];
   const spot = selectEggSpot(
@@ -2213,6 +2457,8 @@ function createMorningEggForDay(
     found: false,
     name: eggInfo.name,
     effect: eggInfo.effect,
+    quality,
+    budget,
   };
 }
 
@@ -2552,6 +2798,7 @@ function storyPhaseLabel(phase: StoryPhase) {
   if (phase === 'morning-human') return '清晨找蛋';
   if (phase === 'chicken-day') return '白天';
   if (phase === 'chicken-dusk') return '黄昏';
+  if (phase === 'chicken-night') return '夜间冒险';
   if (phase === 'dusk-human') return '黄昏收鸡';
   if (phase === 'night-result') return '夜里';
   if (phase === 'epilogue-human') return '清晨的礼物';

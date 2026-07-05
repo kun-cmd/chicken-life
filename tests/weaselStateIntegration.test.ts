@@ -6,6 +6,7 @@ import {
   restoreGameState,
 } from '../src/game/simulation/state';
 import { createWeaselEncounter } from '../src/game/systems/weaselEncounter';
+import { createWeaselSchedule } from '../src/game/systems/weaselSchedule';
 
 test('caught outcome marks the day but does not remove wood or relationship', () => {
   const state = createGameState();
@@ -35,7 +36,7 @@ test('restores encounter position independently and restores schedule fallback',
     ...state,
     weaselSchedule: undefined,
   });
-  assert.ok(restored.weaselSchedule.includes(8));
+  assert.deepEqual(restored.weaselSchedule, createWeaselSchedule(state.profile.runSeed));
   assert.deepEqual(restored.weaselEncounter?.position, { x: 40, y: 50 });
   restored.weaselEncounter!.position.x = 99;
   assert.equal(state.weaselEncounter!.position.x, 40);

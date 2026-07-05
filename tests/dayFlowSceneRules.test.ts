@@ -6,18 +6,17 @@ import {
   createGameState,
   debugJumpToDusk,
   debugSetDay,
-  finishNightResult,
+  finishChickenNight,
 } from '../src/game/simulation/state';
 
-test('dusk call preserves chicken position for human collection', () => {
+test('dusk keeps control on the chicken', () => {
   const state = createGameState();
   applyFlowEvent(state, { type: 'egg-found' });
   applyFlowEvent(state, { type: 'return-home' });
   applyFlowEvent(state, { type: 'tick', amount: 0.7 });
   state.chicken = { x: 300, y: 600 };
-  applyFlowEvent(state, { type: 'call-human' });
   assert.deepEqual(state.chicken, { x: 300, y: 600 });
-  assert.equal(state.mode, 'human');
+  assert.equal(state.mode, 'chicken');
 });
 
 test('night result creates tomorrow egg before returning to morning human control', () => {
@@ -25,11 +24,7 @@ test('night result creates tomorrow egg before returning to morning human contro
   applyFlowEvent(state, { type: 'egg-found' });
   applyFlowEvent(state, { type: 'return-home' });
   applyFlowEvent(state, { type: 'tick', amount: 0.7 });
-  applyFlowEvent(state, { type: 'call-human' });
-  applyFlowEvent(state, { type: 'chicken-entered-coop' });
-  applyFlowEvent(state, { type: 'close-door' });
-
-  finishNightResult(state);
+  finishChickenNight(state);
   const tomorrowEgg = state.egg;
   assert.ok(tomorrowEgg);
   assert.equal(state.flow.phase, 'night-result');

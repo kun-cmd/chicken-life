@@ -511,6 +511,14 @@ body {
   background: linear-gradient(90deg, #d1bdf6, #ffe7a0);
 }
 
+.heat-wrap .meter-track i {
+  background: linear-gradient(90deg, #efc86f, #e86f54);
+}
+
+.pressure-wrap .meter-track i {
+  background: linear-gradient(90deg, #7f91cf, #d76563);
+}
+
 .time-capsule {
   top: 14px;
   left: 50%;
@@ -1067,6 +1075,7 @@ body[data-mode='human'] .today-plate {
 }
 
 .debug-day,
+.debug-affection,
 .debug-volume {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -1077,6 +1086,7 @@ body[data-mode='human'] .today-plate {
 }
 
 .debug-day input,
+.debug-affection input,
 .debug-volume input {
   min-width: 0;
   height: 30px;
@@ -1086,10 +1096,12 @@ body[data-mode='human'] .today-plate {
   color: var(--cream);
 }
 
+.debug-affection input,
 .debug-volume input {
   accent-color: #ffe08a;
 }
 
+.debug-affection b,
 .debug-volume b {
   min-width: 38px;
   text-align: right;

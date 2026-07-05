@@ -4,6 +4,9 @@ export type YardUpgradeId =
   | 'loose-soil'
   | 'shade-shelter'
   | 'low-perch'
+  | 'water-basin'
+  | 'premium-feed'
+  | 'coop-roof'
   | 'coop-ramp'
   | 'yard-lamp'
   | 'door-latch';
@@ -11,55 +14,65 @@ export type YardUpgradeId =
 export interface YardUpgradeDefinition {
   id: YardUpgradeId;
   name: string;
-  cost: 1 | 2 | 3;
+  cost: number;
   position: Vec2;
   effect: string;
 }
 
 export const YARD_LAMP_POSITION: Vec2 = { x: 930, y: 430 };
+export const WATER_BASIN_POSITION: Vec2 = { x: 875, y: 520 };
+export const PREMIUM_FEED_POSITION: Vec2 = { x: 620, y: 390 };
+export const COOP_ROOF_POSITION: Vec2 = { x: 1128, y: 282 };
 
 export const YARD_UPGRADES: YardUpgradeDefinition[] = [
   {
-    id: 'loose-soil',
-    name: '松土区',
-    cost: 1,
-    position: { x: 610, y: 565 },
-    effect: '稳定出现蚯蚓，也能让鸡沙浴',
+    id: 'yard-lamp',
+    name: '门外灯泡',
+    cost: 2,
+    position: YARD_LAMP_POSITION,
+    effect: '照见门外夜虫；每夜第一次靠近降低 5～6 点夜压',
+  },
+  {
+    id: 'water-basin',
+    name: '水盆',
+    cost: 3,
+    position: WATER_BASIN_POSITION,
+    effect: '清晨装水，白天饮用后快速降温',
+  },
+  {
+    id: 'premium-feed',
+    name: '优质饲料桶',
+    cost: 4,
+    position: PREMIUM_FEED_POSITION,
+    effect: '清晨舀一勺，为当天提供稳定的基础饱食',
   },
   {
     id: 'shade-shelter',
-    name: '遮阴棚',
-    cost: 1,
+    name: '遮阴布',
+    cost: 4,
     position: { x: 930, y: 600 },
-    effect: '让鸡乘凉、打盹和梳理羽毛',
+    effect: '形成稳定阴影，让鸡乘凉、打盹和梳理羽毛',
+  },
+  {
+    id: 'coop-roof',
+    name: '加固鸡窝',
+    cost: 5,
+    position: COOP_ROOF_POSITION,
+    effect: '雨夜保持干燥，避免次日蛋品质因淋雨下降',
+  },
+  {
+    id: 'loose-soil',
+    name: '有顶沙浴箱',
+    cost: 6,
+    position: { x: 610, y: 565 },
+    effect: '稳定出现蚯蚓，雨天也能保持可沙浴的干土',
   },
   {
     id: 'low-perch',
-    name: '低栖木',
-    cost: 2,
+    name: '木箱瞭望台',
+    cost: 6,
     position: { x: 340, y: 690 },
-    effect: '增加跳跃路线和高处休息点',
-  },
-  {
-    id: 'coop-ramp',
-    name: '鸡窝坡道',
-    cost: 2,
-    position: { x: 1068, y: 410 },
-    effect: '扩大黄昏进窝的有效门槛',
-  },
-  {
-    id: 'yard-lamp',
-    name: '院灯',
-    cost: 3,
-    position: YARD_LAMP_POSITION,
-    effect: '黄昏后提供固定安全光区',
-  },
-  {
-    id: 'door-latch',
-    name: '可靠门闩',
-    cost: 3,
-    position: { x: 1092, y: 380 },
-    effect: '缩短鸡进窝后的关门动作',
+    effect: '增加跳跃路线，让鸡从高处观察远方',
   },
 ];
 

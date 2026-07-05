@@ -8,12 +8,19 @@ function fillCalendar(
   random: () => number,
 ): boolean {
   if (calendar.length === 14) return true;
+  const forcedWeather: Weather | null = calendar.length === 6 ? 'rain' : null;
   const blocked =
     calendar.length >= 2 && calendar.at(-1) === calendar.at(-2)
       ? calendar.at(-1)
       : null;
   const candidates = (Object.keys(remaining) as Weather[])
-    .filter((weather) => remaining[weather] > 0 && weather !== blocked)
+    .filter(
+      (weather) =>
+        remaining[weather] > 0 &&
+        weather !== blocked &&
+        (calendar.length >= 4 || weather !== 'rain') &&
+        (!forcedWeather || weather === forcedWeather),
+    )
     .map((weather) => ({ weather, order: random() }))
     .sort((a, b) => a.order - b.order);
 

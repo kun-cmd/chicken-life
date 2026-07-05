@@ -22,25 +22,20 @@ test('requires the morning egg before returning home to start chicken day', () =
   assert.equal(returned.chickenInCoop, false);
 });
 
-test('moves from chicken day into dusk and hands control to the human', () => {
+test('moves from chicken day through dusk into a chicken-controlled night', () => {
   let state = transition(createDayFlow(), 'egg-found');
   state = transition(state, 'return-home');
-  state = reduceDayFlow(state, { type: 'tick', amount: 0.7 });
+  state = reduceDayFlow(state, { type: 'tick', amount: 0.6 });
   assert.equal(state.phase, 'chicken-dusk');
-  state = transition(state, 'call-human');
-  assert.equal(state.phase, 'dusk-human');
+  state = reduceDayFlow(state, { type: 'tick', amount: 0.2 });
+  assert.equal(state.phase, 'chicken-night');
 });
 
-test('only closes the night after the chicken is inside', () => {
-  let state = createDayFlow({
-    phase: 'dusk-human',
-    chickenInCoop: false,
-    coopDoorClosed: false,
-  });
-  assert.throws(() => transition(state, 'close-door'), /inside/i);
-  state = transition(state, 'chicken-entered-coop');
-  state = transition(state, 'close-door');
+test('lets the chicken settle from dusk or night without switching actor', () => {
+  let state = createDayFlow({ phase: 'chicken-night', clock: 0.9 });
+  state = transition(state, 'settle-for-night');
   assert.equal(state.phase, 'night-result');
+  assert.equal(state.chickenInCoop, true);
   assert.equal(state.coopDoorClosed, true);
 });
 

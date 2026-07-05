@@ -15,6 +15,8 @@ test('weather calendar is deterministic, bounded, and has no three-day repeat', 
   assert.equal(first.filter((weather) => weather === 'sunny').length, 7);
   assert.equal(first.filter((weather) => weather === 'cloudy').length, 4);
   assert.equal(first.filter((weather) => weather === 'rain').length, 3);
+  assert.equal(first.slice(0, 4).includes('rain'), false);
+  assert.equal(first[6], 'rain');
   for (let index = 2; index < first.length; index += 1) {
     assert.equal(
       first[index] === first[index - 1] && first[index] === first[index - 2],
