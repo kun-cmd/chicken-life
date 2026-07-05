@@ -739,7 +739,7 @@ export class GameScene extends Phaser.Scene {
       });
       this.advanceChickenWorld(activeSeconds);
       this.updateChickenPressure(activeSeconds);
-      this.updateRealtimeThreats(activeSeconds);
+      this.updateRealtimeThreats(dt);
       return;
     }
     if (this.state.body.fluttering) {
@@ -758,7 +758,7 @@ export class GameScene extends Phaser.Scene {
       });
       this.advanceChickenWorld(activeSeconds);
       this.updateChickenPressure(activeSeconds);
-      this.updateRealtimeThreats(activeSeconds);
+      this.updateRealtimeThreats(dt);
       return;
     }
     if (
@@ -859,8 +859,8 @@ export class GameScene extends Phaser.Scene {
 
       this.advanceChickenWorld(actionSeconds);
       this.updateChickenPressure(actionSeconds);
-      if (this.updateRealtimeThreats(actionSeconds)) return;
     }
+    if (this.updateRealtimeThreats(dt)) return;
   }
 
   private updateChickenPressure(dt: number) {
