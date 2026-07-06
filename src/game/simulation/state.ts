@@ -808,12 +808,12 @@ export function restInHole(state: GameState, hole: HoleEntity, dt: number) {
 
   const cooling =
     hole.kind === 'cool-pit'
-      ? 4.2 + hole.depth * 1.15 + hole.moisture * 3.2
+      ? 8.5 + hole.depth * 2 + hole.moisture * 5.5
       : hole.kind === 'safe-rest'
-        ? 2.6 + hole.depth * 0.8
+        ? 5.2 + hole.depth * 1.4
         : hole.kind === 'dust-bath'
-          ? 1.4
-          : 1.8;
+          ? 3
+          : 3.6;
   state.heat = clamp(state.heat - cooling * seconds, 0, 100);
   state.foraging.sprintEnergy = clamp(
     state.foraging.sprintEnergy + (3.5 + hole.depth * 1.1) * seconds,
@@ -3047,15 +3047,15 @@ function foodUnlockHint(type: FoodType) {
 }
 
 function nutritionFor(type: FoodType) {
-  if (type === 'grain') return 5;
-  if (type === 'grass') return 4;
-  if (type === 'bug' || type === 'worm') return 9;
-  if (type === 'cricket') return 12;
-  if (type === 'beetle') return 18;
-  if (type === 'berry') return 10;
-  if (type === 'sunflower') return 9;
-  if (type === 'meat') return 20;
-  return 22;
+  if (type === 'grain') return 3;
+  if (type === 'grass') return 2;
+  if (type === 'bug' || type === 'worm') return 5;
+  if (type === 'cricket') return 7;
+  if (type === 'beetle') return 10;
+  if (type === 'berry') return 6;
+  if (type === 'sunflower') return 6;
+  if (type === 'meat') return 12;
+  return 13;
 }
 
 function foodDiscoveryEffect(type: ForagingFoodType, restored: number) {
