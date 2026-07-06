@@ -138,7 +138,6 @@ export interface Rect {
 export interface ChickenStats {
   maxStamina: number;
   stamina: number;
-  fullness: number;
   speed: number;
   peck: number;
   dig: number;
@@ -198,11 +197,11 @@ export interface DaySummary {
   eggName: string;
   eggReason: string;
   nearMiss: string;
-  fullness: number;
-  stuffedness: number;
+  nutrition: number;
+  rawNutrition: number;
+  nutritionCap: number;
   drankToday: boolean;
   waterBoost: number;
-  effectiveFullness: number;
   nightPressure: number;
   caught: boolean;
 }
@@ -344,12 +343,12 @@ export interface HudSnapshot {
   wood: number;
   showSprint: boolean;
   contextPrompt: string;
-  fullness: number;
-  fullnessPct: number;
-  stuffedness: number;
-  stuffedPct: number;
   nutrition: number;
   nutritionPct: number;
+  effectiveNutrition: number;
+  effectiveNutritionPct: number;
+  nutritionCap: number;
+  nutritionCapPct: number;
   waterBoost: number;
   waterBoostPct: number;
   drankToday: boolean;
@@ -388,8 +387,7 @@ const DAY_SECONDS = DAY_ACTIVE_SECONDS;
 const DUSK_START = 0.58;
 const NIGHT_START = 0.82;
 const KEEPER_FEED_END = 0.25;
-const COMFORT_FULLNESS = 72;
-const FULLNESS_LIMIT = 100;
+const NUTRITION_LIMIT = 100;
 const DIG_SPRINT_COST = 28;
 const WATER_BOOST_LIMIT = 100;
 const WATER_BOOST_DURATION = DAY_SECONDS / 3;
@@ -401,14 +399,7 @@ const CAT_VISIT_CHANCE = 0.5;
 const KEEPER_RESCUE_AFFECTION = 60;
 const KEEPER_SWIFT_RESCUE_AFFECTION = 85;
 export const CORE_LOOP_TUNING = {
-  duskPressurePerActiveSecond: 0.18,
-  nightPressurePerActiveSecond: 0.42,
-  distancePressureBonus: 0.55,
-  shadowPressureBonus: 0.32,
-  offPathPressureBonus: 0.24,
-  lowStaminaPressureBonus: 1.2,
-  stuffedPressureBonus: 0.6,
-  couragePressureReduction: 0.06,
+  predatorContactPressure: 34,
   porchLightReliefMin: 5,
   porchLightReliefMax: 6,
   waterBasinCapacity: 100,
@@ -506,7 +497,6 @@ export function createGameState(): GameState {
     stats: {
       maxStamina: 100,
       stamina: 100,
-      fullness: 0,
       speed: BASE_CHICKEN_SPEED,
       peck: 1,
       dig: 1,
@@ -656,7 +646,6 @@ export function spawnScratchWorm(state: GameState, position: Vec2) {
 export function revealBuriedNightBug(state: GameState, food: FoodEntity) {
   if (food.type !== 'nightBug' || !food.buried) return false;
   food.buried = false;
-  state.nightPressure = clamp(state.nightPressure + 4, 0, 100);
   state.message = '泥土裂开，月光虫钻了出来；刨土声也让远处草丛动了一下。';
   return true;
 }
@@ -701,29 +690,7 @@ export function advanceChickenTime(state: GameState, dt: number) {
 
 export function updateNightPressure(state: GameState, context: PressureContext) {
   if (state.flow.phase !== 'chicken-dusk' && state.flow.phase !== 'chicken-night') return 0;
-  const darkness = state.flow.phase === 'chicken-night' ? 1 : 0.38;
-  const distanceToCoop = Math.min(distance(context.position, COOP_DOOR) / 780, 1);
-  const lowSprintRisk =
-    context.staminaRatio < 0.2
-      ? (0.2 - context.staminaRatio) * CORE_LOOP_TUNING.lowStaminaPressureBonus
-      : 0;
-  const stuffedRisk = overstuffRatioFor(state) * CORE_LOOP_TUNING.stuffedPressureBonus;
-  const basePressure =
-    state.flow.phase === 'chicken-night'
-      ? CORE_LOOP_TUNING.nightPressurePerActiveSecond
-      : CORE_LOOP_TUNING.duskPressurePerActiveSecond;
-  let gain =
-    basePressure +
-    darkness *
-      (distanceToCoop * CORE_LOOP_TUNING.distancePressureBonus +
-        stuffedRisk +
-        lowSprintRisk -
-        state.coopSafety * 0.45);
-
-  if (context.inShadow) gain += CORE_LOOP_TUNING.shadowPressureBonus * darkness;
-  if (!context.onPath) gain += CORE_LOOP_TUNING.offPathPressureBonus * darkness;
-  const courageReduction = state.stats.courage * CORE_LOOP_TUNING.couragePressureReduction;
-  let nextPressure = clamp(state.nightPressure + (gain - courageReduction) * context.dt, 0, 100);
+  let nextPressure = state.nightPressure;
 
   let porchRelief = 0;
   const nearOwnedPorchLight =
@@ -732,7 +699,8 @@ export function updateNightPressure(state: GameState, context: PressureContext) 
   if (
     state.flow.phase === 'chicken-night' &&
     nearOwnedPorchLight &&
-    !state.porchLightReliefUsed
+    !state.porchLightReliefUsed &&
+    state.nightPressure > 0
   ) {
     const reliefSpan =
       CORE_LOOP_TUNING.porchLightReliefMax - CORE_LOOP_TUNING.porchLightReliefMin + 1;
@@ -748,11 +716,27 @@ export function updateNightPressure(state: GameState, context: PressureContext) 
   return porchRelief;
 }
 
+export function addNightPressure(state: GameState, amount: number) {
+  const before = state.nightPressure;
+  state.nightPressure = clamp(state.nightPressure + Math.max(0, amount), 0, 100);
+  return state.nightPressure - before;
+}
+
+export function nutritionPressureFor(state: GameState, bonus = 0) {
+  const pressure = clamp(state.nightPressure, 0, NUTRITION_LIMIT);
+  const rawNutrition = clamp(state.nutrition + bonus, 0, NUTRITION_LIMIT);
+  const nutritionCap = clamp(NUTRITION_LIMIT - pressure, 0, NUTRITION_LIMIT);
+  return {
+    rawNutrition,
+    nutritionCap,
+    effectiveNutrition: Math.min(rawNutrition, nutritionCap),
+  };
+}
+
 export function eatFood(state: GameState, food: FoodEntity) {
   state.eaten[food.type] = (state.eaten[food.type] ?? 0) + 1;
-  const fullnessGain = fullnessGainFor(state, food);
-  state.stats.fullness = clamp(state.stats.fullness + fullnessGain, 0, FULLNESS_LIMIT);
-  state.nutrition = clamp(state.nutrition + fullnessGain, 0, FULLNESS_LIMIT);
+  const nutritionGain = nutritionFor(food.type);
+  state.nutrition = clamp(state.nutrition + nutritionGain, 0, NUTRITION_LIMIT);
   let discovery: ReturnType<typeof consumeFood> | null = null;
   if (isForagingFood(food.type)) {
     discovery = consumeFood(state.foraging, food.type);
@@ -835,15 +819,11 @@ export function restInHole(state: GameState, hole: HoleEntity, dt: number) {
     state.foraging.maxSprintEnergy,
   );
 
-  const digest = Math.min(state.stats.fullness, hole.restPower * 0.9 * seconds);
-  if (digest > 0) {
-    state.stats.fullness = clamp(state.stats.fullness - digest, 0, FULLNESS_LIMIT);
-    if (!state.message) state.message = `鸡缩进${holeKindLabel(hole.kind)}里，肚子慢慢空出来，身体也松下来。`;
-  } else if (!state.message && state.phase === 'day') {
+  if (!state.message && state.phase === 'day') {
     state.message =
       hole.kind === 'cool-pit'
         ? '坑底凉凉的，鸡把翅膀松开，安静趴了一会儿。'
-        : '坑里很安静，不过鸡肚子已经很空了。';
+        : `鸡缩进${holeKindLabel(hole.kind)}里，身体慢慢松下来。`;
   }
   if (state.phase !== 'day') {
     state.nightPressure = clamp(state.nightPressure - (5 + hole.restPower * 0.22) * seconds, 0, 100);
@@ -896,14 +876,6 @@ export function spendStamina(state: GameState, amount: number) {
 
 export function recoverStamina(state: GameState, amount: number) {
   state.stats.stamina = clamp(state.stats.stamina + amount, 0, state.stats.maxStamina);
-}
-
-export function overstuffAmountFor(state: GameState) {
-  return Math.max(0, state.stats.fullness - COMFORT_FULLNESS);
-}
-
-export function overstuffRatioFor(state: GameState) {
-  return clamp(overstuffAmountFor(state) / (FULLNESS_LIMIT - COMFORT_FULLNESS), 0, 1);
 }
 
 export function waterBoostRatioFor(state: GameState) {
@@ -996,7 +968,7 @@ export function servePremiumFeed(state: GameState) {
       state.time,
     ),
   );
-  state.message = '你从饲料桶舀出一勺，今天有一份稳稳的基础饱食。';
+  state.message = '你从饲料桶舀出一勺，今天院子里多了一份稳稳的谷物。';
   return foods;
 }
 
@@ -1493,7 +1465,11 @@ export function finishChickenRun(state: GameState, caught: boolean) {
   if (state.flow.phase === 'chicken-dusk') {
     applyFlowEvent(state, { type: 'call-human' });
   }
-  state.nightPressure = caught ? 88 : Math.min(state.nightPressure, 50);
+  if (caught) {
+    addNightPressure(state, CORE_LOOP_TUNING.predatorContactPressure);
+  } else {
+    state.nightPressure = Math.min(state.nightPressure, 50);
+  }
   state.egg = createEgg(state);
   state.human = { x: 750, y: 448 };
   state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 34 };
@@ -1510,6 +1486,7 @@ export function finishChickenNight(state: GameState, caught = false) {
     return false;
   }
   state.caughtToday = caught;
+  if (caught) addNightPressure(state, CORE_LOOP_TUNING.predatorContactPressure);
   state.dryRestTonight = state.weather !== 'rain' || state.yard.owned.includes('coop-roof');
   if (!caught) recordTrustMemory(state.relationship, state.day, 'safe-close');
   state.egg = createEgg(state);
@@ -1695,7 +1672,6 @@ function resetMorningState(state: GameState, nextMorningEgg: EggEntity | null) {
   state.foraging.refillWave = 0;
   state.body.fluttering = false;
   state.activeAbilityTutorial = null;
-  state.stats.fullness = 0;
   state.eaten = freshEaten();
   state.foods = [];
   state.holes = ageHolesForMorning(state);
@@ -1790,7 +1766,6 @@ export function startNextDay(state: GameState) {
   state.foraging.refillWave = 0;
   state.body.fluttering = false;
   state.activeAbilityTutorial = null;
-  state.stats.fullness = 0;
   state.eaten = freshEaten();
   state.foods = [];
   state.holes = state.holes.filter((hole) => state.day - hole.dugDay <= 1).slice(-4);
@@ -1807,6 +1782,7 @@ export function startNextDay(state: GameState) {
 }
 
 export function buildHudSnapshot(state: GameState, consumeTransient = true): HudSnapshot {
+  const nutritionPressure = nutritionPressureFor(state);
   const snapshot: HudSnapshot = {
     chickenName: state.profile.name,
     requiresNaming: !state.profile.named,
@@ -1823,12 +1799,12 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     wood: state.yard.wood,
     showSprint: state.mode === 'chicken' && state.profile.awakenedAbilities.sprint,
     contextPrompt: goalTipFor(state),
-    fullness: Math.round(state.stats.fullness),
-    fullnessPct: Math.round(state.stats.fullness),
-    stuffedness: Math.round(overstuffAmountFor(state)),
-    stuffedPct: Math.round(overstuffRatioFor(state) * 100),
-    nutrition: Math.round(state.nutrition),
-    nutritionPct: Math.round(state.nutrition),
+    nutrition: Math.round(nutritionPressure.rawNutrition),
+    nutritionPct: Math.round(nutritionPressure.rawNutrition),
+    effectiveNutrition: Math.round(nutritionPressure.effectiveNutrition),
+    effectiveNutritionPct: Math.round(nutritionPressure.effectiveNutrition),
+    nutritionCap: Math.round(nutritionPressure.nutritionCap),
+    nutritionCapPct: Math.round(nutritionPressure.nutritionCap),
     waterBoost: Math.round(state.waterBoost),
     waterBoostPct: Math.round((state.waterBoost / WATER_BOOST_LIMIT) * 100),
     drankToday: state.drankToday,
@@ -1839,8 +1815,7 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     heat: Math.round(state.heat),
     heatPct: Math.round(state.heat),
     showHeat: state.mode === 'chicken',
-    showPressure:
-      state.flow.phase === 'chicken-dusk' || state.flow.phase === 'chicken-night',
+    showPressure: state.mode === 'chicken' || state.nightPressure > 0,
     affection: Math.round(state.affection),
     affectionPct: Math.round(state.affection),
     coopSafety: state.coopSafety,
@@ -2101,8 +2076,10 @@ export function restoreGameState(saved: unknown): GameState {
   if ((input.stats as Partial<ChickenStats> | undefined)?.speed === 142) {
     restored.stats.speed = BASE_CHICKEN_SPEED;
   }
-  const savedNutrition = Number((input as { nutrition?: unknown }).nutrition ?? restored.stats.fullness);
-  restored.nutrition = Number.isFinite(savedNutrition) ? clamp(savedNutrition, 0, FULLNESS_LIMIT) : restored.stats.fullness;
+  delete (restored.stats as ChickenStats & { fullness?: unknown }).fullness;
+  const legacyFullness = (input.stats as { fullness?: unknown } | undefined)?.fullness ?? 0;
+  const savedNutrition = Number((input as { nutrition?: unknown }).nutrition ?? legacyFullness);
+  restored.nutrition = Number.isFinite(savedNutrition) ? clamp(savedNutrition, 0, NUTRITION_LIMIT) : 0;
   const savedWaterBoost = Number((input as { waterBoost?: unknown }).waterBoost ?? 0);
   restored.waterBoost = Number.isFinite(savedWaterBoost) ? clamp(savedWaterBoost, 0, WATER_BOOST_LIMIT) : 0;
   if (!input.yard) {
@@ -2158,6 +2135,11 @@ function isEggQuality(value: unknown): value is EggQuality {
 
 function restoreDaySummary(saved: Partial<DaySummary> | null | undefined): DaySummary | null {
   if (!saved) return null;
+  const legacySummary = saved as Partial<DaySummary> & {
+    fullness?: number;
+    effectiveFullness?: number;
+    stuffedness?: number;
+  };
   const eggType = isEggType(saved.eggType) ? saved.eggType : 'cracked';
   const waterBoost = Number(saved.waterBoost ?? 0);
   return {
@@ -2170,11 +2152,16 @@ function restoreDaySummary(saved: Partial<DaySummary> | null | undefined): DaySu
     eggName: saved.eggName ?? eggCatalog[eggType].name,
     eggReason: saved.eggReason ?? '',
     nearMiss: saved.nearMiss ?? '',
-    fullness: saved.fullness ?? 0,
-    stuffedness: saved.stuffedness ?? 0,
+    nutrition: saved.nutrition ?? legacySummary.effectiveFullness ?? legacySummary.fullness ?? 0,
+    rawNutrition:
+      saved.rawNutrition ??
+      saved.nutrition ??
+      legacySummary.effectiveFullness ??
+      legacySummary.fullness ??
+      0,
+    nutritionCap: clamp(saved.nutritionCap ?? NUTRITION_LIMIT - (saved.nightPressure ?? 0), 0, NUTRITION_LIMIT),
     drankToday: saved.drankToday ?? false,
     waterBoost: Number.isFinite(waterBoost) ? clamp(waterBoost, 0, WATER_BOOST_LIMIT) : 0,
-    effectiveFullness: saved.effectiveFullness ?? saved.fullness ?? 0,
     nightPressure: saved.nightPressure ?? 0,
     caught: saved.caught ?? false,
   };
@@ -2603,11 +2590,11 @@ function randomPlantPoint(): Vec2 {
 function createEgg(state: GameState): EggEntity {
   const type = state.forcedEggType ?? pickEggType(state);
   state.forcedEggType = null;
+  const metrics = eggMetrics(state);
   const outcome = evaluateEggQuality({
-    fullness: state.nutrition,
+    nutrition: metrics.nutrition,
     foodsEaten: state.foraging.foodsEatenToday,
     dryRest: state.dryRestTonight,
-    caught: state.caughtToday,
   });
   return createMorningEggForDay(
     state,
@@ -2645,7 +2632,6 @@ function createMorningEggForDay(
 
 function pickEggType(state: GameState): EggType {
   const eaten = state.foraging.foodsEatenToday;
-  if (state.caughtToday) return 'cracked';
   if (eaten.includes('nightBug')) return 'lantern';
   if (state.nightPressure >= 58) return 'brave';
   if (eaten.includes('berry') || eaten.filter((food) => food === 'sunflower').length >= 2) return 'sunny';
@@ -2670,11 +2656,11 @@ function createDaySummary(state: GameState, gainedMaterials: number): DaySummary
     eggName: egg?.name ?? eggInfo.name,
     eggReason: eggReasonFor(state, eggType, metrics),
     nearMiss: nearMissEggHint(state, eggType, metrics),
-    fullness: Math.round(state.stats.fullness),
-    stuffedness: Math.round(overstuffAmountFor(state)),
+    nutrition: Math.round(metrics.nutrition),
+    rawNutrition: Math.round(metrics.rawNutrition),
+    nutritionCap: Math.round(metrics.nutritionCap),
     drankToday: state.drankToday,
     waterBoost: Math.round(state.waterBoost),
-    effectiveFullness: Math.round(metrics.fullness),
     nightPressure: Math.round(state.nightPressure),
     caught: state.caughtToday,
   };
@@ -2689,44 +2675,52 @@ function eggMetrics(state: GameState) {
     state.eaten.nightBug +
     state.eaten.meat * 2;
   const meatBonus = Math.min(state.eaten.meat, 2) * 12;
+  const pressure = nutritionPressureFor(state, meatBonus);
   return {
     eatenTotal,
     meatBonus,
-    fullness: clamp(state.nutrition + meatBonus, 0, 100),
+    rawNutrition: pressure.rawNutrition,
+    nutritionCap: pressure.nutritionCap,
+    nutrition: pressure.effectiveNutrition,
   };
 }
 
 function eggReasonFor(state: GameState, type: EggType, metrics: ReturnType<typeof eggMetrics>) {
   if (state.forcedEggType === type) return '调试工具指定了这颗蛋。';
+  const pressureCovered = metrics.rawNutrition > metrics.nutrition;
   if (type === 'cracked') {
-    if (state.caughtToday) return '今天被黄鼠狼吓回笼边，鸡太惊险了，只能下裂纹蛋。';
+    if (pressureCovered) {
+      return `原本营养有 ${Math.round(metrics.rawNutrition)}，但夜压 ${Math.round(state.nightPressure)} 把今天的有效营养压到 ${Math.round(metrics.nutrition)}。`;
+    }
     if (metrics.eatenTotal < 3) return `今天总进食数只有 ${metrics.eatenTotal}，少于 3。`;
-    if (metrics.fullness < 35) return `有效营养只有 ${Math.round(metrics.fullness)}，少于 35。`;
+    if (metrics.nutrition < 35) return `有效营养只有 ${Math.round(metrics.nutrition)}，少于 35。`;
     return '没有满足更好蛋的条件，所以落到裂纹蛋。';
   }
   if (type === 'greenLeaf') {
     return state.unlockedFoods.grass
-      ? `嫩草吃到 ${state.eaten.grass} 口，有效营养 ${Math.round(metrics.fullness)}，触发青叶蛋，胆量提升。`
-      : `米粒吃到 ${state.eaten.grain} 口，有效营养 ${Math.round(metrics.fullness)}，触发青叶蛋；嫩草仍需要清晨训练解锁。`;
+      ? `嫩草吃到 ${state.eaten.grass} 口，有效营养 ${Math.round(metrics.nutrition)}，触发青叶蛋，胆量提升。`
+      : `米粒吃到 ${state.eaten.grain} 口，有效营养 ${Math.round(metrics.nutrition)}，触发青叶蛋；嫩草仍需要清晨训练解锁。`;
   }
   if (type === 'swift') {
     return state.unlockedFoods.bug
-      ? `蚯蚓吃到 ${state.eaten.bug} 口，有效营养 ${Math.round(metrics.fullness)}，触发疾走蛋，速度提升。`
-      : `嫩草吃到 ${state.eaten.grass} 口，有效营养 ${Math.round(metrics.fullness)}，触发疾走蛋；蚯蚓仍需要清晨训练解锁。`;
+      ? `蚯蚓吃到 ${state.eaten.bug} 口，有效营养 ${Math.round(metrics.nutrition)}，触发疾走蛋，速度提升。`
+      : `嫩草吃到 ${state.eaten.grass} 口，有效营养 ${Math.round(metrics.nutrition)}，触发疾走蛋；蚯蚓仍需要清晨训练解锁。`;
   }
   if (type === 'lantern') {
     return state.unlockedFoods.nightBug
-      ? `夜虫吃到 ${state.eaten.nightBug} 只，有效营养 ${Math.round(metrics.fullness)}，触发守夜蛋，灯更暖。`
-      : `蚯蚓吃到 ${state.eaten.bug} 口，有效营养 ${Math.round(metrics.fullness)}，触发守夜蛋；夜虫仍需要清晨训练解锁。`;
+      ? `夜虫吃到 ${state.eaten.nightBug} 只，有效营养 ${Math.round(metrics.nutrition)}，触发守夜蛋，灯更暖。`
+      : `蚯蚓吃到 ${state.eaten.bug} 口，有效营养 ${Math.round(metrics.nutrition)}，触发守夜蛋；夜虫仍需要清晨训练解锁。`;
   }
   if (type === 'brave') return `夜压达到 ${Math.round(state.nightPressure)}，鸡安全撑过来，触发铁胆蛋。`;
-  if (type === 'sunny') return `瓜子吃到 ${state.eaten.sunflower} 粒，有效营养 ${Math.round(metrics.fullness)}，触发暖瓜子蛋。`;
-  if (type === 'fullBelly') return `米粒吃到 ${state.eaten.grain} 口，有效营养 ${Math.round(metrics.fullness)}，触发饱饱蛋。`;
-  return `有效营养达到 ${Math.round(metrics.fullness)}，吃得比较稳，触发均衡蛋。`;
+  if (type === 'sunny') return `瓜子吃到 ${state.eaten.sunflower} 粒，有效营养 ${Math.round(metrics.nutrition)}，触发暖瓜子蛋。`;
+  if (type === 'fullBelly') return `米粒吃到 ${state.eaten.grain} 口，有效营养 ${Math.round(metrics.nutrition)}，触发谷香蛋。`;
+  return `有效营养达到 ${Math.round(metrics.nutrition)}，饮食比较丰富，触发均衡蛋。`;
 }
 
 function nearMissEggHint(state: GameState, currentType: EggType, metrics: ReturnType<typeof eggMetrics>) {
-  if (state.caughtToday) return '先安全回笼，避免被黄鼠狼抓到，才有机会下更好的蛋。';
+  if (metrics.rawNutrition > metrics.nutrition) {
+    return `夜压盖住了营养：原本 ${Math.round(metrics.rawNutrition)}，今天只能算 ${Math.round(metrics.nutrition)}。先躲开捕食者或去灯下缓一口气。`;
+  }
 
   const candidates = eggCandidatesFor(state, metrics).filter((candidate) => candidate.type !== currentType);
   let best: { name: string; missing: string[]; score: number } | null = null;
@@ -2743,7 +2737,7 @@ function nearMissEggHint(state: GameState, currentType: EggType, metrics: Return
     if (!best || score < best.score) best = { name: candidate.name, missing, score };
   }
 
-  if (!best) return '今天已经很接近当前能追到的好蛋了，继续稳定吃饱就行。';
+  if (!best) return '今天已经很接近当前能追到的好蛋了，继续稳定觅食就行。';
   return `差一点是${best.name}：${best.missing.slice(0, 2).join('，')}。`;
 }
 
@@ -2751,45 +2745,45 @@ function eggCandidatesFor(state: GameState, metrics: ReturnType<typeof eggMetric
   return [
     !state.unlockedFoods.grass
       ? eggCandidate('greenLeaf', '青叶蛋', [
-          requirement('有效营养', metrics.fullness, 58),
+          requirement('有效营养', metrics.nutrition, 58),
           requirement('米粒', state.eaten.grain, 4),
         ])
       : eggCandidate('greenLeaf', '青叶蛋', [
-          requirement('有效营养', metrics.fullness, 58),
+          requirement('有效营养', metrics.nutrition, 58),
           requirement('嫩草', state.eaten.grass, 4),
         ]),
     !state.unlockedFoods.bug
       ? eggCandidate('swift', '疾走蛋', [
-          requirement('有效营养', metrics.fullness, 64),
+          requirement('有效营养', metrics.nutrition, 64),
           requirement('嫩草', state.eaten.grass, 4),
         ])
       : eggCandidate('swift', '疾走蛋', [
-          requirement('有效营养', metrics.fullness, 64),
+          requirement('有效营养', metrics.nutrition, 64),
           requirement('蚯蚓', state.eaten.bug, 3),
         ]),
     !state.unlockedFoods.nightBug
       ? eggCandidate('lantern', '守夜蛋', [
-          requirement('有效营养', metrics.fullness, 72),
+          requirement('有效营养', metrics.nutrition, 72),
           requirement('蚯蚓', state.eaten.bug, 3),
         ])
       : eggCandidate('lantern', '守夜蛋', [
-          requirement('有效营养', metrics.fullness, 88),
+          requirement('有效营养', metrics.nutrition, 88),
           requirement('夜虫', state.eaten.nightBug, 2),
         ]),
     eggCandidate('brave', '铁胆蛋', [
-      requirement('有效营养', metrics.fullness, 55),
+      requirement('有效营养', metrics.nutrition, 55),
       requirement('夜压', state.nightPressure, 58),
       requirement('蚯蚓或夜虫基础', state.unlockedFoods.nightBug ? 1 : state.eaten.bug, state.unlockedFoods.nightBug ? 1 : 2),
     ]),
     eggCandidate('sunny', '暖瓜子蛋', [
-      requirement('有效营养', metrics.fullness, 70),
+      requirement('有效营养', metrics.nutrition, 70),
       requirement('瓜子', state.eaten.sunflower, 2),
     ]),
-    eggCandidate('fullBelly', '饱饱蛋', [
-      requirement('有效营养', metrics.fullness, 72),
+    eggCandidate('fullBelly', '谷香蛋', [
+      requirement('有效营养', metrics.nutrition, 72),
       requirement('米粒', state.eaten.grain, 4),
     ]),
-    eggCandidate('balanced', '均衡蛋', [requirement('有效营养', metrics.fullness, 50)]),
+    eggCandidate('balanced', '均衡蛋', [requirement('有效营养', metrics.nutrition, 50)]),
   ];
 }
 
@@ -2934,7 +2928,7 @@ function addUpgrade(state: GameState, upgrade: string) {
 
 const eggCatalog: Record<EggType, { name: string; effect: string; upgrade: string }> = {
   fullBelly: {
-    name: '饱饱蛋',
+    name: '谷香蛋',
     effect: '鸡的冲刺上限提升，逃跑和刨坑更有余量。',
     upgrade: '冲刺壳',
   },
@@ -3034,7 +3028,7 @@ function foodUnlockHint(type: FoodType) {
   return '这口还没学会怎么吃。';
 }
 
-function fullnessFor(type: FoodType) {
+function nutritionFor(type: FoodType) {
   if (type === 'grain') return 5;
   if (type === 'grass') return 4;
   if (type === 'bug' || type === 'worm') return 9;
@@ -3067,18 +3061,6 @@ function hardFoodPeckMessage(type: FoodType, remaining: number) {
   if (type === 'beetle') return `甲虫壳很硬，还要再啄 ${remaining} 下才裂开。`;
   if (type === 'nightBug') return `夜虫在泥光里挣了一下，还要再啄 ${remaining} 下。`;
   return `猫留下的肉有点韧，还要再啄 ${remaining} 下。`;
-}
-
-function fullnessGainFor(state: GameState, food: FoodEntity) {
-  const base = fullnessFor(food.type);
-  if (food.type === 'nightBug' || food.type === 'meat' || state.phase !== 'day') return base;
-
-  const roomBeforeStuffed = Math.max(0, COMFORT_FULLNESS - state.stats.fullness);
-  const normalGain = Math.min(base, roomBeforeStuffed);
-  const stuffedGain = base - normalGain;
-  if (stuffedGain <= 0) return normalGain;
-  const moistenedRatio = 0.45 + waterBoostRatioFor(state) * 0.25;
-  return normalGain + Math.max(1, Math.ceil(stuffedGain * moistenedRatio));
 }
 
 function keeperLabel(state: GameState) {

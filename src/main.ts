@@ -78,6 +78,7 @@ const hud = {
   heatWrap: document.querySelector<HTMLElement>('#heatWrap')!,
   heatMeter: document.querySelector<HTMLElement>('#heatMeter')!,
   pressureWrap: document.querySelector<HTMLElement>('#pressureWrap')!,
+  nutritionMeter: document.querySelector<HTMLElement>('#nutritionMeter')!,
   pressureMeter: document.querySelector<HTMLElement>('#pressureMeter')!,
   contextPrompt: document.querySelector<HTMLElement>('#contextPrompt')!,
   toast: document.querySelector<HTMLElement>('#toast')!,
@@ -167,7 +168,9 @@ function renderHud(snapshot: HudSnapshot) {
   hud.heatWrap.hidden = !snapshot.showHeat;
   hud.heatMeter.style.width = `${snapshot.heatPct}%`;
   hud.pressureWrap.hidden = !snapshot.showPressure;
+  hud.nutritionMeter.style.width = `${snapshot.nutritionPct}%`;
   hud.pressureMeter.style.width = `${snapshot.pressurePct}%`;
+  hud.pressureWrap.title = `有效营养 ${snapshot.effectiveNutrition} / 原始营养 ${snapshot.nutrition}，夜压 ${snapshot.pressure}`;
   hud.contextPrompt.textContent = snapshot.contextPrompt;
   if (document.activeElement !== hud.debugAffection) {
     hud.debugAffection.value = String(snapshot.affection);
@@ -179,6 +182,7 @@ function renderHud(snapshot: HudSnapshot) {
   document.body.dataset.phase = snapshot.phase;
   document.body.dataset.mode = snapshot.mode;
   document.body.dataset.lowStamina = snapshot.staminaPct <= 28 ? 'true' : 'false';
+  document.body.dataset.pressureHigh = snapshot.pressurePct >= 60 ? 'true' : 'false';
 
   if (snapshot.toast) {
     hud.toast.textContent = snapshot.toast;

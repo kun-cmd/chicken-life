@@ -97,7 +97,6 @@ import {
   setChickenName,
   servePremiumFeed,
   spawnScratchWorm,
-  overstuffRatioFor,
   spendStamina,
   updateAnimals,
   updateKeeper,

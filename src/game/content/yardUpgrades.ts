@@ -44,7 +44,7 @@ export const YARD_UPGRADES: YardUpgradeDefinition[] = [
     name: '优质饲料桶',
     cost: 4,
     position: PREMIUM_FEED_POSITION,
-    effect: '清晨舀一勺，为当天提供稳定的基础饱食',
+    effect: '清晨舀一勺，让院子里多一份稳定谷物',
   },
   {
     id: 'shade-shelter',

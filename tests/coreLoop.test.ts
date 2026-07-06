@@ -12,6 +12,7 @@ import {
 import {
   CORE_LOOP_TUNING,
   applyFlowEvent,
+  buildHudSnapshot,
   createGameState,
   digHole,
   restInHole,
@@ -56,21 +57,43 @@ test('sprinting heats the chicken while shade and water cool it', () => {
 
 test('egg quality always has a budget floor and rewards wild food plus dry rest', () => {
   const poor = evaluateEggQuality({
-    fullness: 0,
+    nutrition: 0,
     foodsEaten: [],
     dryRest: true,
-    caught: false,
   });
   const excellent = evaluateEggQuality({
-    fullness: 80,
+    nutrition: 80,
     foodsEaten: ['worm', 'nightBug'],
     dryRest: true,
-    caught: false,
   });
   assert.equal(poor.budget, EGG_BUDGET.poor);
   assert.equal(poor.budget, 2);
   assert.equal(excellent.quality, 'excellent');
   assert.equal(excellent.budget, 5);
+});
+
+test('night pressure covers egg nutrition and does not rise just because time passes', () => {
+  const state = createGameState();
+  state.nutrition = 90;
+  state.nightPressure = 42;
+  applyFlowEvent(state, { type: 'egg-found' });
+  applyFlowEvent(state, { type: 'return-home' });
+  applyFlowEvent(state, { type: 'tick', amount: 1 });
+
+  const snapshot = buildHudSnapshot(state, false);
+  assert.equal(snapshot.nutrition, 90);
+  assert.equal(snapshot.effectiveNutrition, 58);
+
+  updateNightPressure(state, {
+    dt: 8,
+    position: { x: 1200, y: 830 },
+    staminaRatio: 0.05,
+    inShadow: true,
+    onPath: false,
+    nearCoop: false,
+    nearLight: false,
+  });
+  assert.equal(state.nightPressure, 42);
 });
 
 test('owned porch light reduces night pressure once per night by five or six', () => {

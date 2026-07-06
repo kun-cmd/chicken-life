@@ -16,20 +16,25 @@ export const BODY_COMFORT_TUNING = {
   rainCoolingPerActiveSecond: 2.4,
   waterCoolingPerActiveSecond: 24,
   passiveCoolingPerActiveSecond: 1.2,
+  nightHeatGainScale: 0.45,
   sprintPenaltyStartsAt: 65,
   minimumSprintScale: 0.55,
 } as const;
 
 export function advanceHeat(current: number, dt: number, context: HeatContext) {
   const seconds = Math.max(0, dt);
-  let change = context.night ? 0 : BODY_COMFORT_TUNING.sunnyHeatPerActiveSecond;
+  let gain = context.night ? 0 : BODY_COMFORT_TUNING.sunnyHeatPerActiveSecond;
+  let cooling = 0;
 
-  if (context.moving) change += BODY_COMFORT_TUNING.movingHeatPerActiveSecond;
-  if (context.sprinting) change += BODY_COMFORT_TUNING.sprintHeatPerActiveSecond;
-  if (!context.moving) change -= BODY_COMFORT_TUNING.passiveCoolingPerActiveSecond;
-  if (context.inShade) change -= BODY_COMFORT_TUNING.shadeCoolingPerActiveSecond;
-  if (context.raining) change -= BODY_COMFORT_TUNING.rainCoolingPerActiveSecond;
-  if (context.drinking) change -= BODY_COMFORT_TUNING.waterCoolingPerActiveSecond;
+  if (context.moving) gain += BODY_COMFORT_TUNING.movingHeatPerActiveSecond;
+  if (context.sprinting) gain += BODY_COMFORT_TUNING.sprintHeatPerActiveSecond;
+  if (!context.moving) cooling += BODY_COMFORT_TUNING.passiveCoolingPerActiveSecond;
+  if (context.inShade) cooling += BODY_COMFORT_TUNING.shadeCoolingPerActiveSecond;
+  if (context.raining) cooling += BODY_COMFORT_TUNING.rainCoolingPerActiveSecond;
+  if (context.drinking) cooling += BODY_COMFORT_TUNING.waterCoolingPerActiveSecond;
+
+  const scaledGain = gain * (context.night ? BODY_COMFORT_TUNING.nightHeatGainScale : 1);
+  const change = scaledGain - cooling;
 
   return clamp(current + change * seconds, 0, BODY_COMFORT_TUNING.maxHeat);
 }

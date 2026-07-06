@@ -3,10 +3,9 @@ import type { ForagingFoodType } from './foraging';
 export type EggQuality = 'poor' | 'ordinary' | 'good' | 'excellent';
 
 export interface EggQualityInput {
-  fullness: number;
+  nutrition: number;
   foodsEaten: readonly ForagingFoodType[];
   dryRest: boolean;
-  caught: boolean;
 }
 
 export const EGG_BUDGET: Record<EggQuality, number> = {
@@ -28,11 +27,10 @@ export function evaluateEggQuality(input: EggQualityInput) {
   const wildKinds = new Set(input.foodsEaten.filter((food) => WILD_FOODS.has(food))).size;
   let score = 0;
 
-  if (input.fullness >= 35) score += 1;
-  if (input.fullness >= 70) score += 1;
+  if (input.nutrition >= 35) score += 1;
+  if (input.nutrition >= 70) score += 1;
   if (wildKinds >= 1) score += 1;
   if (input.dryRest) score += 1;
-  if (input.caught) score -= 2;
 
   const quality: EggQuality =
     score >= 4 ? 'excellent' : score === 3 ? 'good' : score === 2 ? 'ordinary' : 'poor';

@@ -515,8 +515,27 @@ body {
   background: linear-gradient(90deg, #efc86f, #e86f54);
 }
 
+.pressure-wrap .meter-track {
+  overflow: hidden;
+}
+
 .pressure-wrap .meter-track i {
-  background: linear-gradient(90deg, #7f91cf, #d76563);
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+
+#nutritionMeter {
+  left: 0;
+  z-index: 1;
+  background: linear-gradient(90deg, #f7f3ff, #9ff5e1);
+}
+
+#pressureMeter {
+  right: 0;
+  z-index: 2;
+  background: linear-gradient(90deg, #3e2256, #090511);
+  box-shadow: -7px 0 12px rgba(31, 10, 48, 0.24);
 }
 
 .time-capsule {
@@ -642,18 +661,6 @@ body {
   transition: width 160ms ease;
 }
 
-.meter--fullness .meter-track i {
-  background: linear-gradient(90deg, #e7bd61, #fff1a9);
-}
-
-body[data-stuffed='true'] #fullnessMeter {
-  background: linear-gradient(90deg, #f0a65a, var(--danger));
-}
-
-.meter--nutrition .meter-track i {
-  background: linear-gradient(90deg, #78c978, #ddeb87);
-}
-
 .meter--stamina .meter-track i {
   background: linear-gradient(90deg, #d1bdf6, #ffe7a0);
 }
@@ -667,7 +674,7 @@ body[data-low-stamina='true'] #staminaMeter {
 }
 
 body[data-pressure-high='true'] #pressureMeter {
-  background: linear-gradient(90deg, #7d75d6, #ef6b5f);
+  background: linear-gradient(90deg, #4c2871, #08030f);
 }
 
 .meter--water .meter-track i {
