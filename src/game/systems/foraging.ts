@@ -25,32 +25,37 @@ export interface DailyFoodSpawn extends Vec2 {
 }
 
 const ENERGY: Record<ForagingFoodType, number> = {
-  grain: 12,
-  grass: 8,
-  sunflower: 16,
-  worm: 28,
-  cricket: 30,
-  beetle: 32,
-  berry: 22,
-  nightBug: 40,
+  grain: 8,
+  grass: 5,
+  sunflower: 18,
+  worm: 16,
+  cricket: 18,
+  beetle: 14,
+  berry: 10,
+  nightBug: 22,
 };
 
 export function createForagingState(): ForagingState {
   return {
     sprintEnergy: 100,
     maxSprintEnergy: 100,
-    discoveredFoods: ['grain', 'sunflower'],
+    discoveredFoods: ['grain'],
     foodsEatenToday: [],
     refillWave: 0,
   };
 }
 
-export function foodPoolFor(profile: ChickenProfile, dusk: boolean): ForagingFoodType[] {
-  const pool: ForagingFoodType[] = ['grain', 'grass', 'sunflower'];
-  if (profile.awakenedAbilities.scratch) pool.push('worm');
-  if (profile.awakenedAbilities.sprint) pool.push('cricket', 'beetle');
-  if (profile.awakenedAbilities.flutter) pool.push('berry');
-  if (dusk && profile.awakenedAbilities.sprint) pool.push('nightBug');
+export function foodPoolFor(
+  profile: ChickenProfile,
+  dusk: boolean,
+  day = 1,
+): ForagingFoodType[] {
+  const pool: ForagingFoodType[] = ['grain', 'grass'];
+  if (profile.awakenedAbilities.sprint && day >= 3) pool.push('cricket');
+  if (profile.awakenedAbilities.scratch && day >= 4) pool.push('worm');
+  if (profile.awakenedAbilities.sprint && day >= 6) pool.push('beetle');
+  if (profile.awakenedAbilities.flutter && day >= 7) pool.push('berry');
+  if (dusk && profile.awakenedAbilities.sprint && day >= 3) pool.push('nightBug');
   return pool;
 }
 

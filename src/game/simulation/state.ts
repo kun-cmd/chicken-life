@@ -765,7 +765,7 @@ export function eatFood(state: GameState, food: FoodEntity) {
     state.reward = {
       title: '发现新口味',
       name: foodDisplayName(food.type),
-      effect: `冲刺劲恢复 ${discovery.restored}`,
+      effect: foodDiscoveryEffect(food.type, discovery.restored),
     };
     state.message = `${state.profile.name}第一次尝到了${foodDisplayName(food.type)}。`;
   } else {
@@ -1061,11 +1061,11 @@ export function peckFood(state: GameState, food: FoodEntity) {
     return 'missed' as const;
   }
 
-  if (food.type === 'meat') {
-    const hardness = food.hardness ?? 3;
+  if (food.type === 'meat' || food.type === 'cricket' || food.type === 'beetle' || food.type === 'nightBug') {
+    const hardness = food.hardness ?? foodHardness(food.type);
     food.progress = (food.progress ?? 0) + 1;
     if (food.progress < hardness) {
-      state.message = `猫留下的肉有点韧，还要再啄 ${hardness - food.progress} 下。`;
+      state.message = hardFoodPeckMessage(food.type, hardness - food.progress);
       return 'pecked' as const;
     }
 
@@ -2364,19 +2364,23 @@ export function refillForagingFoods(state: GameState, offscreenMudPoints: readon
   const plan = createDailyFoodPlan(
     state.profile.runSeed ^ Math.imul(wave + 1, 0x45d9f3b),
     state.day,
-    foodPoolFor(state.profile, state.flow.phase === 'chicken-dusk'),
+    foodPoolFor(state.profile, state.flow.phase === 'chicken-dusk', state.day),
     offscreenMudPoints,
     4,
   );
   state.foraging.refillWave += 1;
-  return plan.map((food) => spawnFood(state, food.type, food, state.time));
+  return plan.map((food) => {
+    const spawnedFood = spawnFood(state, food.type, food, state.time);
+    if (spawnedFood.type === 'nightBug') spawnedFood.buried = true;
+    return spawnedFood;
+  });
 }
 
 function spawnDailyFood(state: GameState) {
   const plan = createDailyFoodPlan(
     state.profile.runSeed,
     state.day,
-    foodPoolFor(state.profile, false),
+    foodPoolFor(state.profile, false, state.day),
     FOOD_SPAWN_POINTS,
     15,
   );
@@ -2499,6 +2503,11 @@ function spawnFood(state: GameState, type: FoodType, point: Vec2, visibleAt: num
     type,
     visibleAt,
   };
+  const hardness = foodHardness(type);
+  if (hardness > 1) {
+    food.hardness = hardness;
+    food.progress = 0;
+  }
   if (type === 'bug' || type === 'worm') {
     food.expiresAt = clamp01(visibleAt + WORM_VISIBLE_MIN + Math.random() * WORM_VISIBLE_RANDOM);
   }
@@ -3005,15 +3014,15 @@ function freshLightPressureUsed() {
 }
 
 function foodMessage(type: FoodType) {
-  if (type === 'grain') return '嗒，米粒被啄进嘴里，冲刺劲回了一点。';
+  if (type === 'grain') return '嗒，米粒被啄进嘴里，肚子稳稳垫了一点。';
   if (type === 'grass') return '嫩草带着露水，鸡舒服地抖了抖羽毛。';
-  if (type === 'bug' || type === 'worm') return '蚯蚓弹了一下，还是被鸡叼住了。';
-  if (type === 'cricket') return '追上的蟋蟀脆生生的。';
-  if (type === 'beetle') return '甲虫壳咔地一响，鸡精神起来。';
+  if (type === 'bug' || type === 'worm') return '蚯蚓弹了一下，还是被鸡叼住了，肚子暖起来。';
+  if (type === 'cricket') return '追上的蟋蟀脆生生的，鸡喘了口气又精神起来。';
+  if (type === 'beetle') return '甲虫壳咔地一响，吃得很顶饱，明天的蛋会记住这口。';
   if (type === 'berry') return '树莓甜甜的，鸡歪头回味了一会儿。';
   if (type === 'sunflower') return '瓜子又香，鸡凑在人手边舍不得走。';
   if (type === 'meat') return '鸡啄了啄这块奇怪的旧食物。';
-  return '夜虫发着微光，吃完之后脚步都轻快了。';
+  return '夜虫发着微光，吃完后肚子暖亮亮的，今晚的冒险被记住了。';
 }
 
 function foodUnlockHint(type: FoodType) {
@@ -3026,12 +3035,38 @@ function foodUnlockHint(type: FoodType) {
 }
 
 function fullnessFor(type: FoodType) {
-  if (type === 'grain') return 6;
+  if (type === 'grain') return 5;
   if (type === 'grass') return 4;
-  if (type === 'bug') return 7;
-  if (type === 'sunflower') return 6;
+  if (type === 'bug' || type === 'worm') return 9;
+  if (type === 'cricket') return 12;
+  if (type === 'beetle') return 18;
+  if (type === 'berry') return 10;
+  if (type === 'sunflower') return 9;
   if (type === 'meat') return 20;
-  return 18;
+  return 22;
+}
+
+function foodDiscoveryEffect(type: ForagingFoodType, restored: number) {
+  if (type === 'cricket') return `冲刺劲 +${restored}，野味会提高蛋的记忆。`;
+  if (type === 'beetle') return `冲刺劲 +${restored}，很顶饱，蛋品质更容易变好。`;
+  if (type === 'nightBug') return `冲刺劲 +${restored}，可能留下夜食蛋记忆。`;
+  if (type === 'sunflower') return `冲刺劲 +${restored}，这是人给的特别好吃。`;
+  return `冲刺劲 +${restored}`;
+}
+
+function foodHardness(type: FoodType) {
+  if (type === 'cricket') return 2;
+  if (type === 'beetle') return 3;
+  if (type === 'nightBug') return 2;
+  if (type === 'meat') return 3;
+  return 1;
+}
+
+function hardFoodPeckMessage(type: FoodType, remaining: number) {
+  if (type === 'cricket') return `蟋蟀啪地弹了一下，还要追上再啄 ${remaining} 下。`;
+  if (type === 'beetle') return `甲虫壳很硬，还要再啄 ${remaining} 下才裂开。`;
+  if (type === 'nightBug') return `夜虫在泥光里挣了一下，还要再啄 ${remaining} 下。`;
+  return `猫留下的肉有点韧，还要再啄 ${remaining} 下。`;
 }
 
 function fullnessGainFor(state: GameState, food: FoodEntity) {

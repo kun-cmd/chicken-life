@@ -720,6 +720,7 @@ export class GameScene extends Phaser.Scene {
   private updateChicken(dt: number, actions: InputActions) {
     let actionSeconds = 0;
     let diggingSeconds = 0;
+    let huntingSeconds = 0;
     let holeRestSeconds = 0;
     if (
       this.state.facilityLife.activity === 'hole-rest' &&
@@ -857,6 +858,7 @@ export class GameScene extends Phaser.Scene {
         const handled = this.handleChickenActions(dt, actions);
         actionSeconds += handled.actionSeconds;
         diggingSeconds += handled.diggingSeconds;
+        huntingSeconds += handled.huntingSeconds;
       }
     }
     if (!this.state.facilityLife.activity) this.updateFacilityIdle(dt, hasMove);
@@ -872,7 +874,7 @@ export class GameScene extends Phaser.Scene {
       }
       const heatSeconds = Math.max(
         0,
-        actionSeconds - (drinking ? dt : 0) - diggingSeconds - holeRestSeconds,
+        actionSeconds - (drinking ? dt : 0) - diggingSeconds - huntingSeconds - holeRestSeconds,
       );
       if (heatSeconds > 0) {
         advanceChickenHeat(this.state, heatSeconds, {
@@ -886,6 +888,16 @@ export class GameScene extends Phaser.Scene {
       }
       if (diggingSeconds > 0) {
         advanceChickenHeat(this.state, diggingSeconds, {
+          sprinting: false,
+          moving: true,
+          inShade: false,
+          drinking: false,
+          raining: this.state.weather === 'rain',
+          night: this.state.flow.phase === 'chicken-night',
+        });
+      }
+      if (huntingSeconds > 0) {
+        advanceChickenHeat(this.state, huntingSeconds, {
           sprinting: false,
           moving: true,
           inShade: false,
@@ -944,6 +956,7 @@ export class GameScene extends Phaser.Scene {
   private handleChickenActions(dt: number, actions: InputActions) {
     let actionSeconds = 0;
     let diggingSeconds = 0;
+    let huntingSeconds = 0;
     const facility = ownedFacilityAt(this.state.yard, this.state.chicken);
     if (
       actions.interactPressed &&
@@ -952,7 +965,7 @@ export class GameScene extends Phaser.Scene {
       startFacilityActivity(this.state.facilityLife, 'dust-bath')
     ) {
       this.state.message = '鸡侧身钻进松土，开始扑腾着沙浴。';
-      return { actionSeconds: 0.6, diggingSeconds };
+      return { actionSeconds: 0.6, diggingSeconds, huntingSeconds };
     }
     const scratchTutorial = this.state.activeAbilityTutorial === 'scratch';
     const scratchPoint = tutorialForAbility('scratch')!.position;
@@ -1000,7 +1013,7 @@ export class GameScene extends Phaser.Scene {
           this.saveGame(true);
         }
       }
-      return { actionSeconds, diggingSeconds };
+      return { actionSeconds, diggingSeconds, huntingSeconds };
     }
     if (!actions.scratchHeld) this.scratchProgress = 0;
 
@@ -1016,7 +1029,7 @@ export class GameScene extends Phaser.Scene {
           this.playSfx(SFX_UPGRADE_KEY, 0.62);
           this.saveGame(true);
         }
-        return { actionSeconds: 2.2, diggingSeconds };
+        return { actionSeconds: 2.2, diggingSeconds, huntingSeconds };
       }
       this.state.message = canUseAbility(this.state.profile, 'flutter')
         ? '这里没有适合扑翅跳上的矮桩。'
@@ -1032,12 +1045,16 @@ export class GameScene extends Phaser.Scene {
           this.foodViews.delete(food.id);
           this.playSfx(SFX_PECK_KEY, 0.4);
           this.showPeckFx(food);
-          actionSeconds += food.type === 'sunflower' ? 2.2 : 1.4;
+          const peckSeconds = foodPeckSeconds(food.type, result);
+          actionSeconds += peckSeconds;
+          if (isHuntingFood(food.type)) huntingSeconds += peckSeconds;
         } else if (result === 'pecked') {
           this.refreshFoodView(food);
           this.playSfx(SFX_PECK_KEY, 0.36);
           this.showPeckFx(food);
-          actionSeconds += 1.1;
+          const peckSeconds = foodPeckSeconds(food.type, result);
+          actionSeconds += peckSeconds;
+          if (isHuntingFood(food.type)) huntingSeconds += peckSeconds;
         } else {
           this.showGroundPeck();
           actionSeconds += 0.9;
@@ -1056,7 +1073,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    return { actionSeconds, diggingSeconds };
+    return { actionSeconds, diggingSeconds, huntingSeconds };
   }
 
   private performHomeCluck() {
@@ -1965,12 +1982,35 @@ export class GameScene extends Phaser.Scene {
       g.lineBetween(24, 21, 33, 29);
       g.fillStyle(0x16130e, 1).fillCircle(27, 15, 2);
     });
+    for (let progress = 0; progress <= 2; progress += 1) {
+      this.generateTexture(`food-cricket-${progress}`, 42, 36, (g) => {
+        g.fillStyle(0x594026, 1).fillEllipse(19, 18, 16, 9);
+        g.lineStyle(2, 0x2d2217, 1);
+        g.lineBetween(12, 22, progress >= 1 ? 3 : 5, progress >= 1 ? 26 : 30);
+        g.lineBetween(25, 21, progress >= 1 ? 35 : 33, progress >= 1 ? 24 : 29);
+        g.fillStyle(0x16130e, 1).fillCircle(28, 15, 2);
+        if (progress >= 1) g.fillStyle(0xffe0a0, 0.86).fillCircle(12, 10, 2.2);
+      });
+    }
     this.generateTexture('food-beetle', 38, 34, (g) => {
       g.fillStyle(0x37665c, 1).fillEllipse(19, 18, 17, 12);
       g.lineStyle(2, 0xb1d294, 0.8);
       g.lineBetween(19, 8, 19, 28);
       g.fillStyle(0x1c2b24, 1).fillCircle(28, 17, 3);
     });
+    for (let progress = 0; progress <= 3; progress += 1) {
+      this.generateTexture(`food-beetle-${progress}`, 42, 38, (g) => {
+        g.fillStyle(0x37665c, 1).fillEllipse(21, 19, 18, 13);
+        g.lineStyle(2, 0xb1d294, 0.8);
+        g.lineBetween(21, 8, 21, 30);
+        if (progress >= 1) g.lineBetween(14, 16, 21, 20);
+        if (progress >= 2) g.lineBetween(22, 18, 30, 12);
+        g.fillStyle(0x1c2b24, 1).fillCircle(30, 18, 3);
+        for (let i = 0; i < 3; i += 1) {
+          g.fillStyle(0xd6f6b4, i < progress ? 0.18 : 0.7).fillCircle(12 + i * 8, 33, 2);
+        }
+      });
+    }
     this.generateTexture('food-berry', 38, 38, (g) => {
       g.fillStyle(0xb4475d, 1).fillCircle(16, 21, 7);
       g.fillCircle(23, 18, 7);
@@ -1981,6 +2021,13 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(0x7aa7ff, 0.45).fillCircle(18, 18, 8);
       g.fillStyle(0x9fc7ff, 1).fillEllipse(18, 18, 12, 8);
     });
+    for (let progress = 0; progress <= 2; progress += 1) {
+      this.generateTexture(`food-nightBug-${progress}`, 42, 42, (g) => {
+        g.fillStyle(0x7aa7ff, progress >= 1 ? 0.28 : 0.45).fillCircle(21, 21, 9);
+        g.fillStyle(0x9fc7ff, progress >= 1 ? 0.78 : 1).fillEllipse(21, 21, 13, 8);
+        if (progress >= 1) g.fillStyle(0xeaf3ff, 0.82).fillCircle(13, 15, 2.4);
+      });
+    }
     this.generateTexture('food-nightBug-buried', 52, 34, (g) => {
       g.fillStyle(0x2a2133, 0.26).fillEllipse(26, 24, 42, 14);
       g.fillStyle(0x806245, 0.92).fillEllipse(26, 21, 34, 12);
@@ -2266,6 +2313,11 @@ export class GameScene extends Phaser.Scene {
         ? `food-meat-${Math.min(food.progress ?? 0, food.hardness ?? 3)}`
         : food.type === 'sunflower'
           ? `food-sunflower-${Math.min(food.progress ?? 0, food.hardness ?? 2)}`
+          : isHuntingFood(food.type)
+            ? `food-${food.type}-${Math.min(
+                food.progress ?? 0,
+                food.hardness ?? huntingFoodTextureSteps(food.type),
+              )}`
           : `food-${food.type}`;
     const view = this.add.image(food.x, food.y, key).setDepth(35) as FoodView;
     view.foodId = food.id;
@@ -3057,6 +3109,23 @@ function isTextEntryTarget(target: EventTarget | null) {
 
 function isTouchOptionOrNull(value: unknown): value is TouchOption | null {
   return value === null || value === 'head' || value === 'back' || value === 'hold';
+}
+
+function isHuntingFood(type: FoodEntity['type']) {
+  return type === 'cricket' || type === 'beetle' || type === 'nightBug';
+}
+
+function huntingFoodTextureSteps(type: FoodEntity['type']) {
+  return type === 'beetle' ? 3 : 2;
+}
+
+function foodPeckSeconds(type: FoodEntity['type'], result: 'eaten' | 'pecked') {
+  if (type === 'sunflower') return 2.2;
+  if (type === 'nightBug') return result === 'eaten' ? 2 : 1.55;
+  if (type === 'beetle') return result === 'eaten' ? 1.8 : 1.35;
+  if (type === 'cricket') return result === 'eaten' ? 1.45 : 1.15;
+  if (type === 'worm' || type === 'bug') return 1.15;
+  return 0.9;
 }
 
 function normalize(x: number, y: number): Vec2 {
