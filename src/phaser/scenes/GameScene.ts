@@ -32,7 +32,7 @@ import {
   type YardUpgradeId,
 } from '../../game/content/yardUpgrades';
 import { canUseAbility } from '../../game/systems/abilities';
-import { DAY_ACTIVE_SECONDS } from '../../game/systems/dayFlow';
+import { DAY_ACTIVE_SECONDS, DUSK_AT } from '../../game/systems/dayFlow';
 import {
   COOP_FINAL_SEED_RANGE,
   HOME_CALL_HOLD_INTERVAL,
@@ -155,6 +155,7 @@ const SFX_UPGRADE_KEY = 'sfx-upgrade';
 const SFX_NIGHT_RUSTLE_KEY = 'sfx-night-rustle';
 const CHICKEN_WALK_MOVE_EPSILON = 0.04;
 const CHICKEN_WALK_TELEPORT_DISTANCE = 28;
+const HOLE_REST_RADIUS = 36;
 const CLOSE_INTERACTION_RANGE = 74;
 const EGG_PICKUP_RANGE = 76;
 const EGG_SHAPE_REVEAL_RANGE = 112;
@@ -718,23 +719,24 @@ export class GameScene extends Phaser.Scene {
 
   private updateChicken(dt: number, actions: InputActions) {
     let actionSeconds = 0;
-    if (this.state.facilityLife.activity) {
+    let diggingSeconds = 0;
+    let holeRestSeconds = 0;
+    if (
+      this.state.facilityLife.activity === 'hole-rest' &&
+      (!actions.scratchHeld || actions.x !== 0 || actions.y !== 0)
+    ) {
+      this.state.facilityLife.activity = null;
+      this.state.facilityLife.activitySeconds = 0;
+      this.state.facilityLife.needsMovement = false;
+      this.state.message = '鸡从坑里站起来，抖了抖羽毛。';
+    }
+    if (this.state.facilityLife.activity && this.state.facilityLife.activity !== 'hole-rest') {
       const activeSeconds = dt * 0.72;
-      const restingHole =
-        this.state.facilityLife.activity === 'hole-rest' ? this.nearestHole(72) : null;
-      if (restingHole) {
-        restInHole(this.state, restingHole, activeSeconds);
-        this.refreshHoleView(restingHole);
-        this.showRestPuffs(restingHole);
-      }
       const completed = advanceFacilityActivity(this.state.facilityLife, dt);
       if (completed) {
-        this.state.message =
-          completed.activity === 'hole-rest'
-            ? '鸡从自己的坑里站起来，抖了抖羽毛，像是记住了这里。'
-            : completed.firstToday
-              ? '鸡舒舒服服地活动完，这段小院生活被记住了。'
-              : '鸡伸了伸翅膀，又精神起来。';
+        this.state.message = completed.firstToday
+          ? '鸡舒舒服服地活动完，这段小院生活被记住了。'
+          : '鸡伸了伸翅膀，又精神起来。';
         this.saveGame(true);
       }
       this.updateMovingFoods(activeSeconds);
@@ -744,9 +746,7 @@ export class GameScene extends Phaser.Scene {
       advanceChickenHeat(this.state, activeSeconds, {
         sprinting: false,
         moving: false,
-        inShade:
-          this.state.facilityLife.activity === 'shade-rest' ||
-          this.state.facilityLife.activity === 'hole-rest',
+        inShade: this.state.facilityLife.activity === 'shade-rest',
         drinking: false,
         raining: this.state.weather === 'rain',
         night: this.state.flow.phase === 'chicken-night',
@@ -848,24 +848,47 @@ export class GameScene extends Phaser.Scene {
         this.drinkSfxCooldown = 0.55;
       }
     } else {
-      actionSeconds += this.handleChickenActions(dt, actions);
+      const restingHole = actions.scratchHeld && !hasMove ? this.nearestHole(HOLE_REST_RADIUS) : null;
+      if (restingHole) {
+        holeRestSeconds = this.handleHeldHoleRest(dt, restingHole);
+        actionSeconds += holeRestSeconds;
+        this.scratchProgress = 0;
+      } else {
+        const handled = this.handleChickenActions(dt, actions);
+        actionSeconds += handled.actionSeconds;
+        diggingSeconds += handled.diggingSeconds;
+      }
     }
     if (!this.state.facilityLife.activity) this.updateFacilityIdle(dt, hasMove);
 
     const inShade =
       isShadowy(this.state.chicken) ||
-      ownedFacilityAt(this.state.yard, this.state.chicken) === 'shade-shelter';
+      ownedFacilityAt(this.state.yard, this.state.chicken) === 'shade-shelter' ||
+      holeRestSeconds > 0;
     if (actionSeconds > 0) {
       this.updateMovingFoods(actionSeconds);
       if (updateWeatherExposure(this.state, actionSeconds)) {
         this.state.message = '雨水把泥地打湿了，鸡爪和腹羽都沾上了一点泥。';
       }
-      const heatSeconds = Math.max(0, actionSeconds - (drinking ? dt : 0));
+      const heatSeconds = Math.max(
+        0,
+        actionSeconds - (drinking ? dt : 0) - diggingSeconds - holeRestSeconds,
+      );
       if (heatSeconds > 0) {
         advanceChickenHeat(this.state, heatSeconds, {
           sprinting: canSprint,
           moving: hasMove,
           inShade,
+          drinking: false,
+          raining: this.state.weather === 'rain',
+          night: this.state.flow.phase === 'chicken-night',
+        });
+      }
+      if (diggingSeconds > 0) {
+        advanceChickenHeat(this.state, diggingSeconds, {
+          sprinting: false,
+          moving: true,
+          inShade: false,
           drinking: false,
           raining: this.state.weather === 'rain',
           night: this.state.flow.phase === 'chicken-night',
@@ -902,8 +925,25 @@ export class GameScene extends Phaser.Scene {
     if (relief > 0) this.playSfx(SFX_REWARD_KEY, 0.32);
   }
 
+  private handleHeldHoleRest(dt: number, hole: HoleEntity) {
+    const activeSeconds = dt * 0.72;
+    if (this.state.facilityLife.activity !== 'hole-rest') {
+      this.state.message = '鸡趴进自己刨过的坑里。松开 E 就会站起来。';
+    }
+    this.state.facilityLife.activity = 'hole-rest';
+    this.state.facilityLife.activitySeconds = 0;
+    this.state.facilityLife.idleSeconds = 0;
+    this.state.facilityLife.dustBathReady = false;
+    this.state.facilityLife.needsMovement = false;
+    restInHole(this.state, hole, activeSeconds);
+    this.refreshHoleView(hole);
+    this.showRestPuffs(hole);
+    return activeSeconds;
+  }
+
   private handleChickenActions(dt: number, actions: InputActions) {
     let actionSeconds = 0;
+    let diggingSeconds = 0;
     const facility = ownedFacilityAt(this.state.yard, this.state.chicken);
     if (
       actions.interactPressed &&
@@ -912,7 +952,7 @@ export class GameScene extends Phaser.Scene {
       startFacilityActivity(this.state.facilityLife, 'dust-bath')
     ) {
       this.state.message = '鸡侧身钻进松土，开始扑腾着沙浴。';
-      return 0.6;
+      return { actionSeconds: 0.6, diggingSeconds };
     }
     const scratchTutorial = this.state.activeAbilityTutorial === 'scratch';
     const scratchPoint = tutorialForAbility('scratch')!.position;
@@ -926,6 +966,7 @@ export class GameScene extends Phaser.Scene {
     if (actions.scratchHeld && canScratchHere && this.digCooldown <= 0) {
       this.scratchProgress += dt;
       actionSeconds += dt * 1.4;
+      diggingSeconds += dt * 1.4;
       if (this.scratchProgress >= 0.65) {
         if (buriedNightBug && revealBuriedNightBug(this.state, buriedNightBug)) {
           this.refreshFoodView(buriedNightBug);
@@ -959,7 +1000,7 @@ export class GameScene extends Phaser.Scene {
           this.saveGame(true);
         }
       }
-      return actionSeconds;
+      return { actionSeconds, diggingSeconds };
     }
     if (!actions.scratchHeld) this.scratchProgress = 0;
 
@@ -975,7 +1016,7 @@ export class GameScene extends Phaser.Scene {
           this.playSfx(SFX_UPGRADE_KEY, 0.62);
           this.saveGame(true);
         }
-        return 2.2;
+        return { actionSeconds: 2.2, diggingSeconds };
       }
       this.state.message = canUseAbility(this.state.profile, 'flutter')
         ? '这里没有适合扑翅跳上的矮桩。'
@@ -1015,7 +1056,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    return actionSeconds;
+    return { actionSeconds, diggingSeconds };
   }
 
   private performHomeCluck() {
@@ -1647,8 +1688,7 @@ export class GameScene extends Phaser.Scene {
 
   private updateFacilityIdle(dt: number, moving: boolean) {
     const facility = ownedFacilityAt(this.state.yard, this.state.chicken);
-    const hole = this.nearestHole(58);
-    if (moving || (!facility && !hole) || this.state.facilityLife.needsMovement) {
+    if (moving || !facility || this.state.facilityLife.needsMovement) {
       this.state.facilityLife.idleSeconds = 0;
       return;
     }
@@ -1662,9 +1702,7 @@ export class GameScene extends Phaser.Scene {
               YARD_UPGRADES.find((upgrade) => upgrade.id === 'low-perch')!.position,
             ) < 24
           ? 'perch-idle'
-          : hole
-            ? 'hole-rest'
-            : null;
+          : null;
     if (!activity) {
       this.state.facilityLife.idleSeconds = 0;
       return;
@@ -1678,8 +1716,6 @@ export class GameScene extends Phaser.Scene {
       this.state.message =
         activity === 'shade-rest'
           ? '鸡在棚下安静下来，开始打盹和梳理羽毛。'
-          : activity === 'hole-rest'
-            ? '鸡认出了自己刨过的坑，慢慢趴进去休息。'
           : '鸡在低栖木上站稳，慢慢看看院子。';
     }
   }
@@ -2348,7 +2384,7 @@ export class GameScene extends Phaser.Scene {
 
   private drawHoleView(view: Phaser.GameObjects.Graphics, hole: HoleEntity) {
     view.clear();
-    const depth = Phaser.Math.Clamp(hole.depth ?? 1, 1, 4);
+    const depth = Phaser.Math.Clamp(hole.depth ?? 1, 1, 6);
     const moisture = Phaser.Math.Clamp(hole.moisture ?? 0, 0, 1);
     const width = 46 + depth * 12;
     const height = 26 + depth * 6;
@@ -2660,12 +2696,17 @@ export class GameScene extends Phaser.Scene {
 
   private updateNightVeil(time: number) {
     const storyPhase = this.state.flow.phase;
+    const duskStarted =
+      this.state.flow.clock >= DUSK_AT &&
+      storyPhase !== 'morning-human' &&
+      storyPhase !== 'epilogue-human' &&
+      storyPhase !== 'ending';
     const darkness =
       storyPhase === 'night-result'
         ? 0.64
         : storyPhase === 'chicken-night'
           ? 0.64
-        : storyPhase === 'chicken-dusk' || storyPhase === 'dusk-human'
+        : storyPhase === 'chicken-dusk' || storyPhase === 'dusk-human' || duskStarted
           ? 0.38
           : 0;
     if (darkness <= 0) {
@@ -2675,7 +2716,7 @@ export class GameScene extends Phaser.Scene {
       }
       return;
     }
-    if (time - this.lastNightVeilAt < 80) return;
+    if (this.nightVeil.visible && time - this.lastNightVeilAt < 80) return;
     this.lastNightVeilAt = time;
     this.nightVeil.setVisible(true);
     const camera = this.cameras.main;

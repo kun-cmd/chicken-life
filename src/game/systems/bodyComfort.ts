@@ -11,7 +11,7 @@ export const BODY_COMFORT_TUNING = {
   maxHeat: 100,
   sunnyHeatPerActiveSecond: 0.8,
   movingHeatPerActiveSecond: 1.2,
-  sprintHeatPerActiveSecond: 10,
+  sprintHeatPerActiveSecond: 7,
   shadeCoolingPerActiveSecond: 4.5,
   rainCoolingPerActiveSecond: 2.4,
   waterCoolingPerActiveSecond: 24,
