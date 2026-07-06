@@ -8,7 +8,7 @@ export interface YardUpgradeState {
 }
 
 export type FacilityId = Extract<YardUpgradeId, 'loose-soil' | 'shade-shelter' | 'low-perch'>;
-export type FacilityActivity = 'dust-bath' | 'shade-rest' | 'perch-idle';
+export type FacilityActivity = 'dust-bath' | 'shade-rest' | 'perch-idle' | 'hole-rest';
 
 export interface FacilityLifeState {
   idleSeconds: number;

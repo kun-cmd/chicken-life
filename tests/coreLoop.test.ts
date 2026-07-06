@@ -13,6 +13,8 @@ import {
   CORE_LOOP_TUNING,
   applyFlowEvent,
   createGameState,
+  digHole,
+  restInHole,
   updateNightPressure,
 } from '../src/game/simulation/state';
 import { YARD_LAMP_POSITION } from '../src/game/content/yardUpgrades';
@@ -96,4 +98,24 @@ test('owned porch light reduces night pressure once per night by five or six', (
   assert.ok(first <= CORE_LOOP_TUNING.porchLightReliefMax);
   assert.equal(second, 0);
   assert.equal(state.nightPressure, afterFirst);
+});
+
+test('scratching the same place deepens a remembered cooling hole', () => {
+  const state = createGameState();
+  state.weather = 'sunny';
+  state.holesDugToday = 0;
+  const first = digHole(state, { x: 310, y: 505 });
+  assert.ok(first);
+  const firstDepth = first.depth;
+
+  state.holesDugToday = 0;
+  const second = digHole(state, { x: 318, y: 512 });
+  assert.ok(second);
+  assert.equal(second?.id, first.id);
+  assert.ok(second.depth > firstDepth);
+
+  state.heat = 80;
+  restInHole(state, second, 2);
+  assert.ok(state.heat < 80);
+  assert.equal(state.holes.length, 1);
 });

@@ -222,8 +222,9 @@ export class GameScene extends Phaser.Scene {
   private nightVeil!: Phaser.GameObjects.Graphics;
   private weatherOverlay!: Phaser.GameObjects.Graphics;
   private rainView!: Phaser.GameObjects.Graphics;
+  private chickenBodyFx!: Phaser.GameObjects.Graphics;
   private foodViews = new Map<number, FoodView>();
-  private holeViews = new Map<number, Phaser.GameObjects.Image>();
+  private holeViews = new Map<number, Phaser.GameObjects.Graphics>();
   private animalViews = new Map<number, AnimalView>();
   private eggView: Phaser.GameObjects.Container | null = null;
   private eggClueView: Phaser.GameObjects.Graphics | null = null;
@@ -575,6 +576,7 @@ export class GameScene extends Phaser.Scene {
     this.createFoodViews();
     this.createHoleViews();
     this.chicken = this.createChickenSprite(this.state.chicken);
+    this.chickenBodyFx = this.add.graphics().setDepth(66);
     this.human = this.createHumanSprite(this.state.human);
     this.human.setVisible(false);
     this.keeper = this.createKeeperSprite(this.state.keeper);
@@ -718,11 +720,21 @@ export class GameScene extends Phaser.Scene {
     let actionSeconds = 0;
     if (this.state.facilityLife.activity) {
       const activeSeconds = dt * 0.72;
+      const restingHole =
+        this.state.facilityLife.activity === 'hole-rest' ? this.nearestHole(72) : null;
+      if (restingHole) {
+        restInHole(this.state, restingHole, activeSeconds);
+        this.refreshHoleView(restingHole);
+        this.showRestPuffs(restingHole);
+      }
       const completed = advanceFacilityActivity(this.state.facilityLife, dt);
       if (completed) {
-        this.state.message = completed.firstToday
-          ? '鸡舒舒服服地活动完，这段小院生活被记住了。'
-          : '鸡伸了伸翅膀，又精神起来。';
+        this.state.message =
+          completed.activity === 'hole-rest'
+            ? '鸡从自己的坑里站起来，抖了抖羽毛，像是记住了这里。'
+            : completed.firstToday
+              ? '鸡舒舒服服地活动完，这段小院生活被记住了。'
+              : '鸡伸了伸翅膀，又精神起来。';
         this.saveGame(true);
       }
       this.updateMovingFoods(activeSeconds);
@@ -732,7 +744,9 @@ export class GameScene extends Phaser.Scene {
       advanceChickenHeat(this.state, activeSeconds, {
         sprinting: false,
         moving: false,
-        inShade: this.state.facilityLife.activity === 'shade-rest',
+        inShade:
+          this.state.facilityLife.activity === 'shade-rest' ||
+          this.state.facilityLife.activity === 'hole-rest',
         drinking: false,
         raining: this.state.weather === 'rain',
         night: this.state.flow.phase === 'chicken-night',
@@ -825,6 +839,7 @@ export class GameScene extends Phaser.Scene {
     if (drinking) {
       actionSeconds += dt;
       this.scratchProgress = 0;
+      this.showDrinkRipples(this.state.chicken);
       if (distance(this.state.chicken, WATER_BASIN_POSITION) < 64) {
         this.drawOwnedYardUpgrades();
       }
@@ -915,10 +930,20 @@ export class GameScene extends Phaser.Scene {
         if (buriedNightBug && revealBuriedNightBug(this.state, buriedNightBug)) {
           this.refreshFoodView(buriedNightBug);
         } else {
+          const hole = digHole(this.state, {
+            x: this.state.chicken.x,
+            y: this.state.chicken.y + 12,
+          });
+          if (hole) {
+            this.refreshHoleView(hole);
+            this.showScratchDirtFx(hole);
+          }
+          const holeMessage = hole ? this.state.message : '';
           const worm = spawnScratchWorm(this.state, {
             x: this.state.chicken.x + (this.chicken.scaleX >= 0 ? 24 : -24),
             y: this.state.chicken.y + 10,
           });
+          if (holeMessage) this.state.message = `${holeMessage} 旁边还翻出了一条蚯蚓。`;
           this.foodViews.set(worm.id, this.createFoodView(worm));
         }
         this.scratchProgress = 0;
@@ -1622,7 +1647,8 @@ export class GameScene extends Phaser.Scene {
 
   private updateFacilityIdle(dt: number, moving: boolean) {
     const facility = ownedFacilityAt(this.state.yard, this.state.chicken);
-    if (moving || !facility || this.state.facilityLife.needsMovement) {
+    const hole = this.nearestHole(58);
+    if (moving || (!facility && !hole) || this.state.facilityLife.needsMovement) {
       this.state.facilityLife.idleSeconds = 0;
       return;
     }
@@ -1636,7 +1662,9 @@ export class GameScene extends Phaser.Scene {
               YARD_UPGRADES.find((upgrade) => upgrade.id === 'low-perch')!.position,
             ) < 24
           ? 'perch-idle'
-          : null;
+          : hole
+            ? 'hole-rest'
+            : null;
     if (!activity) {
       this.state.facilityLife.idleSeconds = 0;
       return;
@@ -1650,6 +1678,8 @@ export class GameScene extends Phaser.Scene {
       this.state.message =
         activity === 'shade-rest'
           ? '鸡在棚下安静下来，开始打盹和梳理羽毛。'
+          : activity === 'hole-rest'
+            ? '鸡认出了自己刨过的坑，慢慢趴进去休息。'
           : '鸡在低栖木上站稳，慢慢看看院子。';
     }
   }
@@ -2292,13 +2322,58 @@ export class GameScene extends Phaser.Scene {
       }
     }
     for (const hole of this.state.holes) {
-      if (!this.holeViews.has(hole.id)) this.addHoleView(hole);
+      if (!this.holeViews.has(hole.id)) {
+        this.addHoleView(hole);
+      } else {
+        this.refreshHoleView(hole);
+      }
     }
   }
 
   private addHoleView(hole: HoleEntity) {
-    const view = this.add.image(hole.x, hole.y, 'hole').setDepth(34);
+    const view = this.add.graphics().setPosition(hole.x, hole.y).setDepth(34);
     this.holeViews.set(hole.id, view);
+    this.drawHoleView(view, hole);
+  }
+
+  private refreshHoleView(hole: HoleEntity) {
+    const view = this.holeViews.get(hole.id);
+    if (!view) {
+      this.addHoleView(hole);
+      return;
+    }
+    view.setPosition(hole.x, hole.y);
+    this.drawHoleView(view, hole);
+  }
+
+  private drawHoleView(view: Phaser.GameObjects.Graphics, hole: HoleEntity) {
+    view.clear();
+    const depth = Phaser.Math.Clamp(hole.depth ?? 1, 1, 4);
+    const moisture = Phaser.Math.Clamp(hole.moisture ?? 0, 0, 1);
+    const width = 46 + depth * 12;
+    const height = 26 + depth * 6;
+    const rimColor =
+      hole.kind === 'dust-bath'
+        ? 0xb88a56
+        : hole.kind === 'cool-pit'
+          ? 0x6c6f53
+          : hole.kind === 'safe-rest'
+            ? 0x5b4a3b
+            : 0x9b7048;
+    const centerColor = moisture > 0.58 ? 0x45544f : 0x2f2119;
+
+    view.fillStyle(rimColor, 0.36 + depth * 0.08).fillEllipse(0, 0, width + 12, height + 8);
+    view.fillStyle(centerColor, 0.68).fillEllipse(0, 2, width, height);
+    if (hole.kind === 'cool-pit') {
+      view.fillStyle(0xa6d3cb, 0.2 + moisture * 0.18).fillEllipse(-4, -2, width * 0.65, height * 0.42);
+    } else if (hole.kind === 'dust-bath') {
+      view.lineStyle(2, 0xe0bd82, 0.62);
+      for (let offset = -width * 0.32; offset <= width * 0.32; offset += 15) {
+        view.lineBetween(offset - 7, -height * 0.22, offset + 8, height * 0.18);
+      }
+    } else if (hole.kind === 'safe-rest') {
+      view.fillStyle(0xf1dfbb, 0.62).fillEllipse(width * 0.22, -height * 0.15, 16, 6);
+    }
   }
 
   private createEggView(visible: boolean) {
@@ -2473,6 +2548,15 @@ export class GameScene extends Phaser.Scene {
       this.chicken.setScale(facing * 1.06, 0.82);
       this.chicken.rotation = Math.sin(this.time.now / 170) * 0.045;
     }
+    if (!facilityActivity && (!encounter || encounter.warningSeconds > 0)) {
+      if (this.state.heat >= 78) {
+        this.chicken.setScale(facing * 1.08, 0.88);
+        this.chicken.rotation += Math.sin(this.time.now / 140) * 0.025;
+      } else if (this.isChickenVisiblyWet()) {
+        this.chicken.setScale(facing * 0.98, 0.92);
+      }
+    }
+    this.updateChickenBodyVisual(facilityActivity);
     this.lastChickenPosition = { ...this.state.chicken };
     this.human.setPosition(this.state.human.x, this.state.human.y);
     const showEscortLantern =
@@ -2505,6 +2589,72 @@ export class GameScene extends Phaser.Scene {
       this.weasel.scaleX = encounter.position.x > this.state.chicken.x ? -1 : 1;
     } else {
       this.weasel.setVisible(false);
+    }
+  }
+
+  private isChickenVisiblyWet() {
+    return (
+      this.state.mode === 'chicken' &&
+      (this.state.weather === 'rain' || this.state.stormActive) &&
+      !isInCoop(this.state.chicken) &&
+      (this.state.muddyToday || this.state.flow.phase !== 'night-result')
+    );
+  }
+
+  private updateChickenBodyVisual(facilityActivity: string | null) {
+    if (!this.chickenBodyFx) return;
+    this.chickenBodyFx.clear();
+    this.chicken.clearTint();
+
+    const wet = this.isChickenVisiblyWet();
+    const hot = this.state.heat;
+    if (wet) {
+      this.chicken.setTint(0xbfd7d9);
+    } else if (hot >= 78) {
+      this.chicken.setTint(0xffc08a);
+    } else if (hot >= 56) {
+      this.chicken.setTint(0xffd9a3);
+    } else if (this.state.waterBoost >= 70) {
+      this.chicken.setTint(0xe8fff4);
+    }
+
+    const x = this.state.chicken.x;
+    const y = this.state.chicken.y;
+    const now = this.time.now;
+    if (hot >= 62 && !wet) {
+      const alpha = Phaser.Math.Clamp((hot - 55) / 45, 0.18, 0.58);
+      this.chickenBodyFx.lineStyle(2, 0xffba6e, alpha);
+      for (let i = 0; i < 3; i += 1) {
+        const offset = -18 + i * 18;
+        const wave = Math.sin(now / 180 + i) * 4;
+        this.chickenBodyFx.beginPath();
+        this.chickenBodyFx.moveTo(x + offset, y - 42);
+        this.chickenBodyFx.lineTo(x + offset + wave, y - 52);
+        this.chickenBodyFx.lineTo(x + offset - wave, y - 62);
+        this.chickenBodyFx.strokePath();
+      }
+    }
+
+    if (wet) {
+      this.chickenBodyFx.fillStyle(0xbde2e8, 0.62);
+      for (let i = 0; i < 4; i += 1) {
+        const dx = -20 + i * 13;
+        const drop = (now / 180 + i * 9) % 16;
+        this.chickenBodyFx.fillEllipse(x + dx, y - 22 + drop, 4, 8);
+      }
+    }
+
+    if (facilityActivity === 'dust-bath') {
+      this.chickenBodyFx.fillStyle(0xd0a16b, 0.3);
+      for (let i = 0; i < 5; i += 1) {
+        this.chickenBodyFx.fillCircle(
+          x + Math.sin(now / 90 + i) * 28,
+          y + 10 + Math.cos(now / 120 + i) * 8,
+          4,
+        );
+      }
+    } else if (facilityActivity === 'shade-rest' || facilityActivity === 'hole-rest') {
+      this.chickenBodyFx.fillStyle(0xffe7b0, 0.24).fillEllipse(x, y - 10, 84, 34);
     }
   }
 
@@ -2741,6 +2891,29 @@ export class GameScene extends Phaser.Scene {
       duration: 220,
       onComplete: () => dust.destroy(),
     });
+  }
+
+  private showScratchDirtFx(hole: HoleEntity) {
+    for (let i = 0; i < 6; i += 1) {
+      const clod = this.add.ellipse(
+        hole.x + Phaser.Math.Between(-18, 18),
+        hole.y + Phaser.Math.Between(-10, 8),
+        Phaser.Math.Between(6, 10),
+        Phaser.Math.Between(3, 6),
+        hole.moisture > 0.55 ? 0x5b4f3f : 0xb88a56,
+        0.68,
+      ).setDepth(58);
+      this.tweens.add({
+        targets: clod,
+        x: clod.x + Phaser.Math.Between(-22, 22),
+        y: clod.y + Phaser.Math.Between(10, 24),
+        alpha: 0,
+        duration: 420,
+        delay: i * 24,
+        ease: 'Quad.easeOut',
+        onComplete: () => clod.destroy(),
+      });
+    }
   }
 
   private showCluckFx(position: Vec2, scaredCount: number) {

@@ -159,10 +159,17 @@ export interface FoodEntity extends Vec2 {
   buried?: boolean;
 }
 
+export type HoleTerritoryKind = 'fresh' | 'cool-pit' | 'dust-bath' | 'safe-rest';
+
 export interface HoleEntity extends Vec2 {
   id: number;
   dugDay: number;
+  lastUsedDay: number;
   restPower: number;
+  depth: number;
+  moisture: number;
+  useSeconds: number;
+  kind: HoleTerritoryKind;
 }
 
 export interface EggEntity extends Vec2 {
@@ -414,6 +421,11 @@ const WORM_VISIBLE_RANDOM = 0.06;
 const RESTOCK_DISTANCE_FROM_CHICKEN = 420;
 const RESTOCK_FOOD_COUNT = 3;
 const RAIN_MUD_SECONDS = 4;
+const HOLE_REUSE_RADIUS = 62;
+const HOLE_MAX_DEPTH = 4;
+const HOLE_KEEP_DAYS = 3;
+const TERRITORY_KEEP_DAYS = 8;
+const MAX_REMEMBERED_HOLES = 5;
 
 function createTutorialEgg(): EggEntity {
   return {
@@ -773,34 +785,109 @@ export function digHole(state: GameState, position: Vec2) {
     return null;
   }
 
-  const hole: HoleEntity = {
+  const existingHole = nearestHole(state.holes, position, HOLE_REUSE_RADIUS);
+  const hole: HoleEntity = existingHole ?? {
     id: state.nextId++,
     x: position.x,
     y: position.y,
     dugDay: state.day,
+    lastUsedDay: state.day,
     restPower: 8 + state.stats.dig * 4,
+    depth: 0,
+    moisture: baseHoleMoisture(state, position),
+    useSeconds: 0,
+    kind: 'fresh',
   };
-  state.holes.push(hole);
+
+  hole.depth = clamp(hole.depth + 1, 1, HOLE_MAX_DEPTH);
+  hole.restPower = Math.max(hole.restPower, 8 + state.stats.dig * 4) + (existingHole ? 2 : 0);
+  hole.lastUsedDay = state.day;
+  hole.moisture = clamp((hole.moisture + baseHoleMoisture(state, hole)) / 2, 0, 1);
+  hole.kind = classifyHole(state, hole);
+
+  if (!existingHole) state.holes.push(hole);
   state.holesDugToday += 1;
   spendStamina(state, DIG_SPRINT_COST);
-  state.message = `土被刨开了，坑里能消食，也能让鸡压压惊。今天还能再刨 ${Math.max(0, digLimit - state.holesDugToday)} 个。`;
+  state.message = existingHole
+    ? `${state.profile.name}又把熟悉的坑刨深了一点，现在更像${holeKindLabel(hole.kind)}。`
+    : `土被刨开了，坑里能消食，也能让鸡压压惊。今天还能再刨 ${Math.max(0, digLimit - state.holesDugToday)} 个。`;
   return hole;
 }
 
 export function restInHole(state: GameState, hole: HoleEntity, dt: number) {
-  const digest = Math.min(state.stats.fullness, hole.restPower * 0.9 * dt);
+  const seconds = Math.max(0, dt);
+  hole.useSeconds += seconds;
+  hole.lastUsedDay = state.day;
+  hole.kind = classifyHole(state, hole);
+
+  const cooling =
+    hole.kind === 'cool-pit'
+      ? 4.2 + hole.depth * 1.15 + hole.moisture * 3.2
+      : hole.kind === 'safe-rest'
+        ? 2.6 + hole.depth * 0.8
+        : hole.kind === 'dust-bath'
+          ? 1.4
+          : 1.8;
+  state.heat = clamp(state.heat - cooling * seconds, 0, 100);
+  state.foraging.sprintEnergy = clamp(
+    state.foraging.sprintEnergy + (3.5 + hole.depth * 1.1) * seconds,
+    0,
+    state.foraging.maxSprintEnergy,
+  );
+
+  const digest = Math.min(state.stats.fullness, hole.restPower * 0.9 * seconds);
   if (digest > 0) {
     state.stats.fullness = clamp(state.stats.fullness - digest, 0, FULLNESS_LIMIT);
-    if (!state.message) state.message = '鸡缩在坑里打了个盹，肚子慢慢空出来，但今天吃到的营养还在。';
+    if (!state.message) state.message = `鸡缩进${holeKindLabel(hole.kind)}里，肚子慢慢空出来，身体也松下来。`;
   } else if (!state.message && state.phase === 'day') {
-    state.message = '坑里暖暖的，不过鸡肚子已经很空了。';
+    state.message =
+      hole.kind === 'cool-pit'
+        ? '坑底凉凉的，鸡把翅膀松开，安静趴了一会儿。'
+        : '坑里很安静，不过鸡肚子已经很空了。';
   }
   if (state.phase !== 'day') {
-    state.nightPressure = clamp(state.nightPressure - (5 + hole.restPower * 0.22) * dt, 0, 100);
+    state.nightPressure = clamp(state.nightPressure - (5 + hole.restPower * 0.22) * seconds, 0, 100);
     if (state.weasel.active && distance(state.weasel, hole) > 54) {
       state.weasel.stunned = Math.max(state.weasel.stunned, 0.18 + state.stats.dig * 0.015);
     }
   }
+}
+
+function nearestHole(holes: readonly HoleEntity[], position: Vec2, radius: number) {
+  let best: HoleEntity | null = null;
+  let bestDistance = radius;
+  for (const hole of holes) {
+    const holeDistance = distance(hole, position);
+    if (holeDistance < bestDistance) {
+      best = hole;
+      bestDistance = holeDistance;
+    }
+  }
+  return best;
+}
+
+function baseHoleMoisture(state: GameState, position: Vec2) {
+  if (state.weather === 'rain') return 0.78;
+  if (isNearPond(position)) return 0.58;
+  if (isShadowy(position)) return 0.38;
+  return 0.16;
+}
+
+function classifyHole(state: GameState, hole: HoleEntity): HoleTerritoryKind {
+  const facility = ownedFacilityAt(state.yard, hole);
+  if (facility === 'loose-soil' || (hole.moisture < 0.28 && hole.depth >= 2)) {
+    return 'dust-bath';
+  }
+  if (state.phase !== 'day' && hole.useSeconds >= 2) return 'safe-rest';
+  if (isShadowy(hole) || hole.moisture >= 0.46 || hole.depth >= 3) return 'cool-pit';
+  return 'fresh';
+}
+
+function holeKindLabel(kind: HoleTerritoryKind) {
+  if (kind === 'cool-pit') return '凉坑';
+  if (kind === 'dust-bath') return '沙浴地';
+  if (kind === 'safe-rest') return '安全休息地';
+  return '小土坑';
 }
 
 export function spendStamina(state: GameState, amount: number) {
@@ -1032,6 +1119,7 @@ export function expireFoods(state: GameState) {
 }
 
 export function updateWeatherExposure(state: GameState, dt: number) {
+  updateHoleMoisture(state, dt);
   if (
     state.weather !== 'rain' ||
     isOnPath(state.chicken) ||
@@ -1044,6 +1132,16 @@ export function updateWeatherExposure(state: GameState, dt: number) {
   state.offPathRainSeconds = Math.min(RAIN_MUD_SECONDS, state.offPathRainSeconds + Math.max(0, dt));
   if (state.offPathRainSeconds >= RAIN_MUD_SECONDS) state.muddyToday = true;
   return !wasMuddy && state.muddyToday;
+}
+
+function updateHoleMoisture(state: GameState, dt: number) {
+  const seconds = Math.max(0, dt);
+  if (seconds <= 0) return;
+  const delta = state.weather === 'rain' ? 0.0075 * seconds : -0.0028 * seconds;
+  for (const hole of state.holes) {
+    hole.moisture = clamp(hole.moisture + delta, 0, 1);
+    hole.kind = classifyHole(state, hole);
+  }
 }
 
 export function restockEdibleFoods(state: GameState) {
@@ -1600,7 +1698,7 @@ function resetMorningState(state: GameState, nextMorningEgg: EggEntity | null) {
   state.stats.fullness = 0;
   state.eaten = freshEaten();
   state.foods = [];
-  state.holes = state.holes.filter((hole) => state.day - hole.dugDay <= 1).slice(-4);
+  state.holes = ageHolesForMorning(state);
   state.animals = [];
   state.animalCooldown = 5.8;
   state.catVisitedToday = false;
@@ -1610,6 +1708,31 @@ function resetMorningState(state: GameState, nextMorningEgg: EggEntity | null) {
   state.reward = null;
   spawnDailyFood(state);
   return deliveredWood;
+}
+
+function ageHolesForMorning(state: GameState) {
+  const moistureDelta = state.weather === 'rain' ? 0.22 : -0.12;
+  return state.holes
+    .map((hole) => {
+      const aged: HoleEntity = {
+        ...hole,
+        moisture: clamp(hole.moisture + moistureDelta, 0, 1),
+      };
+      aged.kind = classifyHole(state, aged);
+      return aged;
+    })
+    .filter((hole) => {
+      const daysSinceUse = state.day - hole.lastUsedDay;
+      const daysSinceDug = state.day - hole.dugDay;
+      if (hole.depth >= 2 || hole.useSeconds >= 4) return daysSinceUse <= TERRITORY_KEEP_DAYS;
+      return daysSinceDug <= HOLE_KEEP_DAYS;
+    })
+    .sort((a, b) => holeMemoryScore(state, b) - holeMemoryScore(state, a))
+    .slice(0, MAX_REMEMBERED_HOLES);
+}
+
+function holeMemoryScore(state: GameState, hole: HoleEntity) {
+  return hole.depth * 8 + hole.useSeconds * 0.8 - Math.max(0, state.day - hole.lastUsedDay);
 }
 
 export function collectEgg(state: GameState) {
@@ -1817,6 +1940,7 @@ function goalTipFor(state: GameState) {
   const facility = ownedFacilityAt(state.yard, state.chicken);
   if (state.facilityLife.activity === 'dust-bath') return '正在松土里沙浴。';
   if (state.facilityLife.activity === 'shade-rest') return '正在遮阴棚下休息和梳理羽毛。';
+  if (state.facilityLife.activity === 'hole-rest') return '正在自己刨过的坑里休息。';
   if (state.facilityLife.activity === 'perch-idle') return '正在低栖木上站稳、看看院子。';
   if (state.facilityLife.dustBathReady && facility === 'loose-soil') return '松开再按 E，在松土里沙浴。';
   if (facility === 'shade-shelter') return '在遮阴棚里停下 2.5 秒，可以休息。';
@@ -1912,7 +2036,11 @@ export function restoreGameState(saved: unknown): GameState {
     unlockedFoods: { ...fresh.unlockedFoods, ...(input.unlockedFoods ?? {}) },
     eaten: { ...fresh.eaten, ...(input.eaten ?? {}) },
     foods: Array.isArray(input.foods) ? input.foods.map((food) => restoreFood(food, fresh)) : fresh.foods,
-    holes: Array.isArray(input.holes) ? input.holes : fresh.holes,
+    holes: Array.isArray(input.holes)
+      ? input.holes
+          .map((hole) => restoreHole(hole))
+          .filter((hole): hole is HoleEntity => Boolean(hole))
+      : fresh.holes,
     egg: restoreEgg(input.egg, hasSavedFlow),
     eggSearch: {
       ...fresh.eggSearch,
@@ -2050,6 +2178,36 @@ function restoreDaySummary(saved: Partial<DaySummary> | null | undefined): DaySu
     nightPressure: saved.nightPressure ?? 0,
     caught: saved.caught ?? false,
   };
+}
+
+function restoreHole(saved: Partial<HoleEntity> | null | undefined): HoleEntity | null {
+  if (!saved) return null;
+  const x = Number(saved.x);
+  const y = Number(saved.y);
+  const id = Number(saved.id);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(id)) return null;
+  const dugDay = Number(saved.dugDay);
+  const lastUsedDay = Number(saved.lastUsedDay ?? saved.dugDay);
+  const restPower = Number(saved.restPower);
+  const depth = Number(saved.depth ?? 1);
+  const moisture = Number(saved.moisture ?? 0.2);
+  const useSeconds = Number(saved.useSeconds ?? 0);
+  return {
+    id: Math.floor(id),
+    x,
+    y,
+    dugDay: Number.isFinite(dugDay) ? Math.floor(dugDay) : 1,
+    lastUsedDay: Number.isFinite(lastUsedDay) ? Math.floor(lastUsedDay) : 1,
+    restPower: Number.isFinite(restPower) ? clamp(restPower, 1, 48) : 12,
+    depth: Number.isFinite(depth) ? clamp(Math.round(depth), 1, HOLE_MAX_DEPTH) : 1,
+    moisture: Number.isFinite(moisture) ? clamp(moisture, 0, 1) : 0.2,
+    useSeconds: Number.isFinite(useSeconds) ? clamp(useSeconds, 0, 999) : 0,
+    kind: isHoleKind(saved.kind) ? saved.kind : 'fresh',
+  };
+}
+
+function isHoleKind(value: unknown): value is HoleTerritoryKind {
+  return value === 'fresh' || value === 'cool-pit' || value === 'dust-bath' || value === 'safe-rest';
 }
 
 function restoreFood(food: FoodEntity, fresh: GameState): FoodEntity {
