@@ -1,6 +1,6 @@
 import type { Vec2 } from '../simulation/state';
 
-export type WeaselPhase = 'stalking' | 'chasing' | 'repelled';
+export type WeaselPhase = 'lurking' | 'pouncing' | 'panic' | 'retreating' | 'repelled';
 export type WeaselOutcome = 'active' | 'repelled' | 'caught' | 'safe';
 
 export interface WeaselEncounterState {
@@ -8,6 +8,8 @@ export interface WeaselEncounterState {
   phase: WeaselPhase;
   lightExposure: number;
   warningSeconds: number;
+  phaseSeconds: number;
+  target: Vec2 | null;
 }
 
 export interface WeaselContext {
@@ -17,15 +19,19 @@ export interface WeaselContext {
   coopDoorClosed: boolean;
   illuminated: boolean;
   humanBlocking: boolean;
+  contactEnabled?: boolean;
+  retreatTarget?: Vec2;
   speedScale?: number;
 }
 
 export function createWeaselEncounter(position: Vec2, warningSeconds = 0): WeaselEncounterState {
   return {
     position: { ...position },
-    phase: 'stalking',
+    phase: 'lurking',
     lightExposure: 0,
     warningSeconds: Math.max(0, warningSeconds),
+    phaseSeconds: 0,
+    target: null,
   };
 }
 
@@ -46,35 +52,124 @@ export function updateWeaselEncounter(
     };
   }
   const lightExposure = context.illuminated
-    ? state.lightExposure + dt
+    ? Math.min(1.5, state.lightExposure + dt)
     : Math.max(0, state.lightExposure - dt * 0.5);
-  if (lightExposure >= 1.5) {
-    return {
-      state: { ...state, phase: 'repelled', lightExposure },
-      outcome: 'repelled',
-    };
-  }
 
   const dx = context.chicken.x - state.position.x;
   const dy = context.chicken.y - state.position.y;
   const distance = Math.hypot(dx, dy);
-  if (distance <= 32 && !context.humanBlocking) {
-    return { state: { ...state, lightExposure }, outcome: 'caught' };
+  const speedScale = (context.speedScale ?? 1) * (context.illuminated ? 0.58 : 1);
+  const canContact = (context.contactEnabled ?? true) && !context.humanBlocking;
+
+  if (state.phase === 'lurking') {
+    return {
+      state: {
+        ...state,
+        phase: 'pouncing',
+        lightExposure,
+        phaseSeconds: 0.62 + lightExposure * 0.18,
+        target: { ...context.chicken },
+      },
+      outcome: 'active',
+    };
   }
 
-  const phase: WeaselPhase = distance < 240 ? 'chasing' : 'stalking';
-  const speed =
-    (phase === 'chasing' ? 112 : 62) *
-    (context.illuminated ? 0.35 : 1) *
-    (context.speedScale ?? 1);
-  const length = Math.max(distance, 1);
-  const position = {
-    x: state.position.x + (dx / length) * speed * dt,
-    y: state.position.y + (dy / length) * speed * dt,
-  };
+  if ((state.phase === 'pouncing' || state.phase === 'panic') && distance <= 32 && canContact) {
+    return {
+      state: { ...state, phase: 'panic', lightExposure, phaseSeconds: 1, target: null },
+      outcome: 'caught',
+    };
+  }
+
+  if (state.phase === 'pouncing') {
+    const target = state.target ?? context.chicken;
+    const tx = target.x - state.position.x;
+    const ty = target.y - state.position.y;
+    const targetDistance = Math.hypot(tx, ty);
+    const step = 430 * speedScale * dt;
+    const reachedTarget = targetDistance <= Math.max(12, step);
+    const position = reachedTarget
+      ? { ...target }
+      : moveToward(state.position, target, step);
+    const phaseSeconds = state.phaseSeconds - dt;
+    if (phaseSeconds <= 0 || reachedTarget) {
+      return {
+        state: { position, phase: 'panic', lightExposure, warningSeconds: 0, phaseSeconds: 1, target: null },
+        outcome: 'active',
+      };
+    }
+    return {
+      state: { ...state, position, lightExposure, warningSeconds: 0, phaseSeconds },
+      outcome: 'active',
+    };
+  }
+
+  if (state.phase === 'panic') {
+    const phaseSeconds = state.phaseSeconds - dt;
+    const position = moveToward(state.position, context.chicken, 148 * speedScale * dt);
+    if (phaseSeconds <= 0) {
+      return {
+        state: {
+          position,
+          phase: 'retreating',
+          lightExposure,
+          warningSeconds: 0,
+          phaseSeconds: 0,
+          target: context.retreatTarget ? { ...context.retreatTarget } : null,
+        },
+        outcome: 'active',
+      };
+    }
+    return {
+      state: { ...state, position, lightExposure, warningSeconds: 0, phaseSeconds, target: null },
+      outcome: 'active',
+    };
+  }
+
+  if (state.phase === 'retreating') {
+    const target = state.target ?? context.retreatTarget;
+    if (!target) {
+      return {
+        state: { ...state, phase: 'lurking', lightExposure, warningSeconds: 2.1, phaseSeconds: 0, target: null },
+        outcome: 'active',
+      };
+    }
+    const retreatDistance = Math.hypot(target.x - state.position.x, target.y - state.position.y);
+    const step = 238 * speedScale * dt;
+    if (retreatDistance <= Math.max(24, step)) {
+      return {
+        state: {
+          position: { ...target },
+          phase: 'lurking',
+          lightExposure,
+          warningSeconds: 2.1 + lightExposure * 0.8,
+          phaseSeconds: 0,
+          target: null,
+        },
+        outcome: 'active',
+      };
+    }
+    return {
+      state: { ...state, position: moveToward(state.position, target, step), lightExposure, target: { ...target } },
+      outcome: 'active',
+    };
+  }
+
   return {
-    state: { position, phase, lightExposure, warningSeconds: 0 },
+    state: { ...state, lightExposure, warningSeconds: 0 },
     outcome: 'active',
+  };
+}
+
+function moveToward(from: Vec2, to: Vec2, step: number) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (length <= 0 || step <= 0) return { ...from };
+  const ratio = Math.min(1, step / length);
+  return {
+    x: from.x + dx * ratio,
+    y: from.y + dy * ratio,
   };
 }
 

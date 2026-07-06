@@ -302,6 +302,7 @@ export interface GameState {
   catWillVisitToday: boolean;
   weasel: WeaselState;
   weaselSchedule: number[];
+  weaselApproach: number;
   weaselEncounter: WeaselEncounterState | null;
   weaselEncounterDoneToday: boolean;
   handLanternActive: boolean;
@@ -530,6 +531,7 @@ export function createGameState(): GameState {
       stunned: 0,
     },
     weaselSchedule: createWeaselSchedule(profile.runSeed),
+    weaselApproach: 0,
     weaselEncounter: null,
     weaselEncounterDoneToday: false,
     handLanternActive: false,
@@ -1458,7 +1460,7 @@ function oldRepairCoop(state: GameState) {
 }
 
 export function finishChickenRun(state: GameState, caught: boolean) {
-  state.caughtToday = caught;
+  state.caughtToday = state.caughtToday || caught;
   if (state.flow.phase === 'chicken-day') {
     applyFlowEvent(state, { type: 'tick', amount: 1 });
   }
@@ -1485,7 +1487,7 @@ export function finishChickenNight(state: GameState, caught = false) {
   if (state.flow.phase !== 'chicken-dusk' && state.flow.phase !== 'chicken-night') {
     return false;
   }
-  state.caughtToday = caught;
+  state.caughtToday = state.caughtToday || caught;
   if (caught) addNightPressure(state, CORE_LOOP_TUNING.predatorContactPressure);
   state.dryRestTonight = state.weather !== 'rain' || state.yard.owned.includes('coop-roof');
   if (!caught) recordTrustMemory(state.relationship, state.day, 'safe-close');
@@ -1515,7 +1517,11 @@ export function finishNightResult(state: GameState) {
 
 export function resolveWeaselOutcome(state: GameState, outcome: WeaselOutcome) {
   if (outcome === 'active') return;
-  if (outcome === 'caught') state.caughtToday = true;
+  if (outcome === 'caught') {
+    state.caughtToday = true;
+    addNightPressure(state, CORE_LOOP_TUNING.predatorContactPressure);
+    return;
+  }
   if (outcome === 'repelled') {
     recordTrustMemory(state.relationship, state.day, 'first-rescue');
   }
@@ -1637,6 +1643,7 @@ function resetMorningState(state: GameState, nextMorningEgg: EggEntity | null) {
   state.carryingChicken = false;
   state.repairedToday = false;
   state.keeperRescueUsedToday = false;
+  state.weaselApproach = 0;
   state.weaselEncounter = null;
   state.weaselEncounterDoneToday = false;
   state.handLanternActive = false;
@@ -1741,6 +1748,7 @@ export function startNextDay(state: GameState) {
   state.carryingChicken = false;
   state.repairedToday = false;
   state.keeperRescueUsedToday = false;
+  state.weaselApproach = 0;
   state.drankToday = false;
   state.premiumFeedServedToday = false;
   state.dryRestTonight = true;
@@ -1776,6 +1784,8 @@ export function startNextDay(state: GameState) {
   state.catVisitedToday = false;
   state.catWillVisitToday = Math.random() < CAT_VISIT_CHANCE;
   state.weasel = { x: -120, y: 820, active: false, chasing: false, stunned: 0 };
+  state.weaselEncounter = null;
+  state.weaselEncounterDoneToday = false;
   state.reward = null;
   state.message = '新的一天，小院泥地又冒出细小食物。';
   spawnDailyFood(state);
@@ -2051,6 +2061,9 @@ export function restoreGameState(saved: unknown): GameState {
     weaselSchedule: Array.isArray(input.weaselSchedule)
       ? input.weaselSchedule
       : createWeaselSchedule(restoredProfile.runSeed),
+    weaselApproach: Number.isFinite(input.weaselApproach)
+      ? clamp(Number(input.weaselApproach), 0, 100)
+      : 0,
     weaselEncounter:
       input.weaselEncounter &&
       typeof input.weaselEncounter === 'object' &&
@@ -2058,6 +2071,11 @@ export function restoreGameState(saved: unknown): GameState {
         ? {
             ...input.weaselEncounter,
             position: { ...input.weaselEncounter.position },
+            phase: input.weaselEncounter.phase ?? 'lurking',
+            lightExposure: Number(input.weaselEncounter.lightExposure ?? 0),
+            warningSeconds: Number(input.weaselEncounter.warningSeconds ?? 0),
+            phaseSeconds: Number(input.weaselEncounter.phaseSeconds ?? 0),
+            target: input.weaselEncounter.target ? { ...input.weaselEncounter.target } : null,
           }
         : null,
     weaselEncounterDoneToday: input.weaselEncounterDoneToday ?? false,

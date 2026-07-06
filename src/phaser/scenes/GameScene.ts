@@ -32,7 +32,7 @@ import {
   type YardUpgradeId,
 } from '../../game/content/yardUpgrades';
 import { canUseAbility } from '../../game/systems/abilities';
-import { DAY_ACTIVE_SECONDS, DUSK_AT } from '../../game/systems/dayFlow';
+import { DAY_ACTIVE_SECONDS, DUSK_AT, NIGHT_AT } from '../../game/systems/dayFlow';
 import {
   COOP_FINAL_SEED_RANGE,
   HOME_CALL_HOLD_INTERVAL,
@@ -907,6 +907,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       this.advanceChickenWorld(actionSeconds);
+      this.updateWeaselApproach(actionSeconds, canSprint, diggingSeconds + huntingSeconds);
       this.updateChickenPressure(actionSeconds);
     }
     if (this.updateRealtimeThreats(dt)) return;
@@ -1126,6 +1127,57 @@ export class GameScene extends Phaser.Scene {
     this.syncFoodViews();
   }
 
+  private updateWeaselApproach(actionSeconds: number, sprinting: boolean, noisySeconds: number) {
+    if (actionSeconds <= 0 || this.state.weaselEncounter || this.state.weaselEncounterDoneToday) return;
+    if (
+      this.state.flow.phase !== 'chicken-dusk' &&
+      this.state.flow.phase !== 'chicken-night'
+    ) {
+      return;
+    }
+    if (
+      !hasWeaselEncounter(
+        this.state.weaselSchedule,
+        this.state.day,
+        this.state.profile.runSeed,
+      )
+    ) {
+      return;
+    }
+
+    const duskSpan = Math.max(0.1, (NIGHT_AT - DUSK_AT) * DAY_ACTIVE_SECONDS);
+    const baseRate = 100 / duskSpan;
+    const multiplier = this.weaselApproachMultiplier(sprinting);
+    const noiseBonus = noisySeconds > 0 ? Math.min(8, noisySeconds * 3.2) : 0;
+    this.state.weaselApproach = Phaser.Math.Clamp(
+      this.state.weaselApproach + baseRate * actionSeconds * multiplier + noiseBonus,
+      0,
+      100,
+    );
+    if (this.state.weaselApproach >= 100) this.spawnWeasel();
+  }
+
+  private weaselApproachMultiplier(sprinting: boolean) {
+    const houseCenter = { x: HOUSE.x + HOUSE.width * 0.5, y: HOUSE.y + HOUSE.height * 0.5 };
+    const safetyDistance = Math.min(
+      distance(this.state.chicken, COOP_DOOR),
+      distance(this.state.chicken, houseCenter),
+      this.state.yard.owned.includes('yard-lamp')
+        ? distance(this.state.chicken, YARD_LAMP_POSITION) + 80
+        : Infinity,
+    );
+    const farRatio = Phaser.Math.Clamp((safetyDistance - 220) / 620, 0, 1);
+    const edgeDistance = Math.min(
+      this.state.chicken.x,
+      WORLD_WIDTH - this.state.chicken.x,
+      this.state.chicken.y,
+      WORLD_HEIGHT - this.state.chicken.y,
+    );
+    const edgeBonus = edgeDistance < 210 ? 0.45 : 0;
+    const sprintBonus = sprinting ? 0.22 : 0;
+    return 1 + farRatio * 1.45 + edgeBonus + sprintBonus;
+  }
+
   private updateRealtimeThreats(dt: number) {
     this.spawnWeasel();
     const encounter = this.state.weaselEncounter;
@@ -1138,6 +1190,8 @@ export class GameScene extends Phaser.Scene {
       coopDoorClosed: false,
       illuminated: false,
       humanBlocking: false,
+      contactEnabled: this.caughtCooldown <= 0,
+      retreatTarget: this.farthestWeaselSpawnPoint(),
       speedScale: this.state.day <= 3 ? 0.78 : 1,
     });
     this.state.weaselEncounter = result.state;
@@ -1153,6 +1207,14 @@ export class GameScene extends Phaser.Scene {
 
     if (result.outcome === 'active') return false;
     resolveWeaselOutcome(this.state, result.outcome);
+    if (result.outcome === 'caught') {
+      this.caughtCooldown = 1.8;
+      this.playSfx(SFX_CLUCK_KEYS[0], 0.72);
+      this.cameras.main.shake(90, 0.005);
+      this.state.message = '黄鼠狼擦着羽毛扑过，鸡还能继续逃；今晚的夜压压上来了一截。';
+      this.emitHud(true, true);
+      return false;
+    }
     this.weasel.setVisible(false);
     if (result.outcome === 'repelled') {
       this.playCloseMoment();
@@ -1160,13 +1222,7 @@ export class GameScene extends Phaser.Scene {
       return false;
     }
     if (result.outcome === 'safe') return false;
-
-    finishChickenNight(this.state, true);
-    this.nightResultTimer = 2.1;
-    this.chicken.setVisible(false);
-    this.state.message = '黄鼠狼扑了过来，鸡丢下夜食，惊叫着逃回鸡窝。';
-    this.emitHud(true, true);
-    return true;
+    return false;
   }
 
   private isAtCoopDoor() {
@@ -1585,10 +1641,12 @@ export class GameScene extends Phaser.Scene {
     if (this.state.weaselEncounter) return;
     if (force) this.state.weaselEncounterDoneToday = false;
     if (this.state.weaselEncounterDoneToday) return;
-    const nightPhase = this.state.flow.phase === 'chicken-night';
+    const weaselPhase =
+      this.state.flow.phase === 'chicken-dusk' || this.state.flow.phase === 'chicken-night';
     if (
       !force &&
-      (!nightPhase ||
+      (!weaselPhase ||
+        this.state.weaselApproach < 100 ||
         !hasWeaselEncounter(
           this.state.weaselSchedule,
           this.state.day,
@@ -1602,15 +1660,15 @@ export class GameScene extends Phaser.Scene {
       x: Phaser.Math.Clamp(point.x, 30, WORLD_WIDTH - 30),
       y: Phaser.Math.Clamp(point.y, 30, WORLD_HEIGHT - 30),
     };
-    this.state.weaselEncounter = createWeaselEncounter(position, 1.2);
+    this.state.weaselApproach = 100;
+    this.state.weaselEncounter = createWeaselEncounter(position, force ? 0.35 : 1.05);
     this.rustleSfxCooldown = 0;
     this.weasel.setVisible(false);
     this.showWeaselRustleFx(position);
-    this.playSfx(SFX_NIGHT_RUSTLE_KEY, 0.34);
-    this.state.message =
-      this.state.day === 8
-        ? '院墙边的草忽然动了。先听声音、看方向，再决定逃跑还是叫人。'
-        : '院墙边传来窸窣声，一道细长的影子正在靠近。';
+    if (force) {
+      this.playSfx(SFX_NIGHT_RUSTLE_KEY, 0.34);
+      this.state.message = '调试：院墙边的草忽然动了。';
+    }
   }
 
   private pickWeaselSpawnPoint(): Vec2 {
@@ -2629,7 +2687,7 @@ export class GameScene extends Phaser.Scene {
     if (
       !facilityActivity &&
       encounter &&
-      encounter.warningSeconds <= 0 &&
+      encounter.phase !== 'lurking' &&
       distance(encounter.position, this.state.chicken) < 260
     ) {
       this.chicken.setScale(facing * 1.06, 0.82);
@@ -2672,7 +2730,7 @@ export class GameScene extends Phaser.Scene {
     this.keeper.scaleX = this.state.keeper.facing;
     if (encounter) {
       this.weasel.setPosition(encounter.position.x, encounter.position.y);
-      this.weasel.setVisible(encounter.warningSeconds <= 0);
+      this.weasel.setVisible(encounter.phase !== 'lurking');
       this.weasel.scaleX = encounter.position.x > this.state.chicken.x ? -1 : 1;
     } else {
       this.weasel.setVisible(false);
@@ -2775,6 +2833,27 @@ export class GameScene extends Phaser.Scene {
     this.nightVeil.clear();
     this.nightVeil.fillStyle(0x08090d, darkness);
     this.nightVeil.fillRect(view.x - 4, view.y - 4, view.width + 8, view.height + 8);
+
+    const encounter = this.state.weaselEncounter;
+    const approachRatio = Phaser.Math.Clamp(this.state.weaselApproach / 100, 0, 1);
+    const ambushRatio = encounter
+      ? encounter.phase === 'lurking'
+        ? 0.9
+        : 1
+      : approachRatio;
+    if (
+      this.state.mode === 'chicken' &&
+      (storyPhase === 'chicken-dusk' || storyPhase === 'chicken-night') &&
+      ambushRatio > 0.08
+    ) {
+      const edge = Phaser.Math.Linear(10, 96, ambushRatio) / camera.zoom;
+      const alpha = Phaser.Math.Linear(0.04, 0.28, ambushRatio);
+      this.nightVeil.fillStyle(0x16081f, alpha);
+      this.nightVeil.fillRect(view.x - 4, view.y - 4, view.width + 8, edge);
+      this.nightVeil.fillRect(view.x - 4, view.y + view.height - edge + 4, view.width + 8, edge);
+      this.nightVeil.fillRect(view.x - 4, view.y - 4, edge, view.height + 8);
+      this.nightVeil.fillRect(view.x + view.width - edge + 4, view.y - 4, edge, view.height + 8);
+    }
 
     if (this.state.mode === 'chicken' && darkness > 0) {
       const radius = (220 + this.state.stats.lamp * 12) / camera.zoom;

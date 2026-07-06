@@ -8,7 +8,7 @@ import {
 import { createWeaselEncounter } from '../src/game/systems/weaselEncounter';
 import { createWeaselSchedule } from '../src/game/systems/weaselSchedule';
 
-test('caught outcome marks the day but does not remove wood or relationship', () => {
+test('caught outcome adds pressure but keeps the encounter alive', () => {
   const state = createGameState();
   state.yard.wood = 4;
   state.relationship.memories = 9;
@@ -17,8 +17,9 @@ test('caught outcome marks the day but does not remove wood or relationship', ()
   assert.equal(state.caughtToday, true);
   assert.equal(state.yard.wood, 4);
   assert.equal(state.relationship.memories, 9);
-  assert.equal(state.weaselEncounter, null);
-  assert.equal(state.weaselEncounterDoneToday, true);
+  assert.ok(state.nightPressure > 0);
+  assert.ok(state.weaselEncounter);
+  assert.equal(state.weaselEncounterDoneToday, false);
 });
 
 test('repelling the first encounter records one relationship memory', () => {
