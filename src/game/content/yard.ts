@@ -77,6 +77,15 @@ export const PLANT_PATCHES: Rect[] = [
   { x: 92, y: 780, width: 126, height: 80 },
 ];
 
+export const EGG_HIDE_AREAS: Rect[] = [
+  ...PLANT_PATCHES,
+  { x: 166, y: 308, width: 82, height: 58 },
+  { x: 1290, y: 178, width: 96, height: 68 },
+  { x: 226, y: 706, width: 88, height: 70 },
+  { x: 1082, y: 620, width: 94, height: 66 },
+  { x: 1195, y: 780, width: 112, height: 76 },
+];
+
 export const BLOCKERS: Rect[] = [HOUSE, COOP, POND];
 
 export function isInsideRect(point: Vec2, rect: Rect, padding = 0) {

@@ -166,6 +166,26 @@ test('holes cool the same at night as they do in the day', () => {
   assert.equal(nightHeat, dayHeat);
 });
 
+test('ordinary holes cool quickly while deep holes cool faster', () => {
+  const restHeat = (depth: number) => {
+    const state = createGameState();
+    state.weather = 'sunny';
+    const hole = digHole(state, { x: 900, y: 700 });
+    assert.ok(hole);
+    hole.depth = depth;
+    hole.moisture = 0.16;
+    state.heat = 80;
+    restInHole(state, hole, 1);
+    return state.heat;
+  };
+
+  const shallowHeat = restHeat(1);
+  const deepHeat = restHeat(3);
+
+  assert.ok(shallowHeat < 64);
+  assert.ok(deepHeat < shallowHeat);
+});
+
 test('food raises egg momentum at the slower tuned rate', () => {
   const state = createGameState();
   state.nutrition = 0;

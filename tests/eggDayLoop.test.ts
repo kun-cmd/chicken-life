@@ -12,7 +12,7 @@ import {
 
 test('day one has a poor tutorial egg that immediately adds its budget', () => {
   const state = createGameState();
-  assert.equal(state.eggSearch.spotId, 'coop-straw');
+  assert.equal(state.eggSearch.spotId, 'west-patch');
   assert.equal(collectEgg(state), true);
   assert.equal(state.yard.wood, 2);
   assert.equal(state.yard.pendingWood, 0);
@@ -30,7 +30,7 @@ test('next morning keeps the generated egg and uses another authored spot', () =
 
   assert.equal(state.yard.wood, 2);
   assert.equal(state.yard.pendingWood, 0);
-  assert.notEqual(state.eggSearch.spotId, 'coop-straw');
+  assert.notEqual(state.eggSearch.spotId, 'west-patch');
   const spot = EGG_SPOTS.find((candidate) => candidate.id === state.eggSearch.spotId);
   assert.deepEqual({ x: state.egg!.x, y: state.egg!.y }, spot!.position);
 });

@@ -22,7 +22,7 @@ test('HUD snapshot copies the album and yard state for the notebook', () => {
 
   const snapshot = buildHudSnapshot(state, false);
   assert.deepEqual(snapshot.yard, { wood: 4, pendingWood: 1, owned: ['yard-lamp'] });
-  assert.equal(snapshot.eggArchive[0].name, '圆润蛋');
+  assert.equal(snapshot.eggArchive[0].name, '普通蛋');
 
   snapshot.yard.owned.push('coop-ramp');
   snapshot.eggArchive[0].count = 9;
