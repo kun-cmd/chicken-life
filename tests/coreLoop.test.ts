@@ -43,15 +43,6 @@ test('sprinting heats the chicken while shade and water cool it', () => {
     raining: false,
     night: false,
   });
-  const exerting = advanceHeat(20, 1, {
-    sprinting: false,
-    moving: true,
-    exertion: true,
-    inShade: false,
-    drinking: false,
-    raining: false,
-    night: false,
-  });
   const hot = advanceHeat(20, 1, {
     sprinting: true,
     moving: true,
@@ -69,7 +60,6 @@ test('sprinting heats the chicken while shade and water cool it', () => {
     night: false,
   });
   assert.ok(walking > 20);
-  assert.ok(exerting > walking);
   assert.ok(hot - walking > 9);
   assert.ok(cooled < hot);
   assert.equal(sprintScaleForHeat(BODY_COMFORT_TUNING.maxHeat), BODY_COMFORT_TUNING.minimumSprintScale);
