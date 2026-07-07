@@ -281,6 +281,7 @@ export interface GameState {
   premiumFeedServedToday: boolean;
   waterBasinLevel: number;
   dryRestTonight: boolean;
+  chickenWetFromRain: boolean;
   porchLightReliefUsed: boolean;
   holesDugToday: number;
   lightPressureUsed: number[];
@@ -481,6 +482,7 @@ export function createGameState(): GameState {
     premiumFeedServedToday: false,
     waterBasinLevel: 0,
     dryRestTonight: true,
+    chickenWetFromRain: false,
     porchLightReliefUsed: false,
     holesDugToday: 0,
     lightPressureUsed: freshLightPressureUsed(),
@@ -1527,8 +1529,10 @@ export function advanceNightResult(state: GameState) {
   }
 
   const nextMorningEgg = state.egg;
+  const hadDryRest = state.dryRestTonight;
   applyFlowEvent(state, { type: 'next-morning' });
   const deliveredWood = resetMorningState(state, nextMorningEgg);
+  state.chickenWetFromRain = !hadDryRest;
   const baseMessage =
     deliveredWood > 0
       ? `清晨到了，昨天换回的 ${deliveredWood} 份木料已经送到。先去找今天的蛋。`
@@ -1540,8 +1544,21 @@ export function advanceNightResult(state: GameState) {
     rainOffset === undefined
       ? baseMessage
       : `${baseMessage} 收音机说明${rainOffset === 1 ? '天' : '后天'}会有一场大雨。`;
+  if (state.chickenWetFromRain) {
+    state.message += ` ${state.profile.name}昨晚被雨淋透了，羽毛还是湿的。靠近鸡按E也许能帮它擦干。`;
+  }
 }
 
+
+export function dryRainSoakedChicken(state: GameState) {
+  if (state.flow.phase !== 'morning-human') return false;
+  if (!state.chickenWetFromRain) return false;
+  state.chickenWetFromRain = false;
+  state.affection = Math.min(state.affection + 8, 100);
+  recordTrustMemory(state.relationship, state.day, 'close-interaction');
+  state.message = `${state.profile.name}舒服地抖了抖羽毛，重新变得蓬松干爽。`;
+  return true;
+}
 export function startEpilogueMorning(state: GameState) {
   applyFlowEvent(state, { type: 'start-epilogue' });
   const spot = EGG_SPOTS.find((candidate) => candidate.id === 'far-hedge');
@@ -2027,6 +2044,7 @@ export function restoreGameState(saved: unknown): GameState {
         )
       : 0,
     dryRestTonight: input.dryRestTonight ?? true,
+    chickenWetFromRain: input.chickenWetFromRain ?? false,
     porchLightReliefUsed: input.porchLightReliefUsed ?? false,
     chicken: { ...fresh.chicken, ...(input.chicken ?? {}) },
     human: { ...fresh.human, ...(input.human ?? {}) },

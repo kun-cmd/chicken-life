@@ -64,6 +64,7 @@ import {
   debugSetDay,
   digHole,
   drinkAtWaterSource,
+  dryRainSoakedChicken,
   expireFoods,
   finishChickenNight,
   improveCoopAbility,
@@ -1334,7 +1335,11 @@ export class GameScene extends Phaser.Scene {
 
     if (actions.interactPressed) {
       if (distance(this.state.human, this.state.chicken) < CLOSE_INTERACTION_RANGE) {
-        this.openCloseInteraction();
+        if (dryRainSoakedChicken(this.state)) {
+          this.playSfx(SFX_REWARD_KEY, 0.58);
+        } else {
+          this.openCloseInteraction();
+        }
       } else if (nearCoop) {
         if (repairCoop(this.state)) {
           this.playSfx(SFX_REWARD_KEY, 0.58);
