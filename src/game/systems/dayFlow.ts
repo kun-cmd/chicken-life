@@ -47,10 +47,15 @@ export function createDayFlow(overrides: Partial<DayFlowState> = {}): DayFlowSta
 }
 
 export function activeActor(phase: StoryPhase): 'human' | 'chicken' | 'none' {
-  if (phase === 'morning-human' || phase === 'dusk-human' || phase === 'epilogue-human') {
+  if (phase === 'morning-human' || phase === 'epilogue-human') {
     return 'human';
   }
-  if (phase === 'chicken-day' || phase === 'chicken-dusk' || phase === 'chicken-night') {
+  if (
+    phase === 'chicken-day' ||
+    phase === 'chicken-dusk' ||
+    phase === 'chicken-night' ||
+    phase === 'dusk-human'
+  ) {
     return 'chicken';
   }
   return 'none';
@@ -102,7 +107,8 @@ export function reduceDayFlow(state: DayFlowState, event: DayFlowEvent): DayFlow
 
   if (event.type === 'call-human') {
     if (state.phase !== 'chicken-dusk') throw new Error('Human can only be called at dusk');
-    return { ...state, phase: 'dusk-human' };
+    // Legacy event: dusk now stays chicken-controlled instead of starting an escort chore.
+    return state;
   }
 
   if (event.type === 'chicken-entered-coop') {

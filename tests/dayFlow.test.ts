@@ -39,6 +39,14 @@ test('lets the chicken settle from dusk or night without switching actor', () =>
   assert.equal(state.coopDoorClosed, true);
 });
 
+test('keeps legacy human call from starting a dusk escort chore', () => {
+  let state = createDayFlow({ phase: 'chicken-dusk', clock: 0.7 });
+  state = transition(state, 'call-human');
+  assert.equal(state.phase, 'chicken-dusk');
+  assert.equal(state.chickenInCoop, false);
+  assert.equal(state.coopDoorClosed, false);
+});
+
 test('starts the next morning with a closed coop and a new egg requirement', () => {
   const state = createDayFlow({
     day: 3,

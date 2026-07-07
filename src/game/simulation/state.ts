@@ -663,10 +663,9 @@ function syncLegacyPhaseFromFlow(state: GameState) {
   state.mode = actor === 'none' ? state.mode : actor;
   state.phase =
     state.flow.phase === 'morning-human' ||
-    state.flow.phase === 'dusk-human' ||
     state.flow.phase === 'epilogue-human'
       ? 'human'
-      : state.flow.phase === 'chicken-dusk'
+      : state.flow.phase === 'chicken-dusk' || state.flow.phase === 'dusk-human'
         ? 'dusk'
         : state.flow.phase === 'chicken-night'
           ? 'night'
@@ -679,7 +678,6 @@ function syncLegacyPhaseFromFlow(state: GameState) {
 
 export function advanceChickenTime(state: GameState, dt: number) {
   if (state.mode !== 'chicken') return;
-  const oldPhase = state.phase;
   state.time = clamp01(state.time + dt / DAY_SECONDS);
 
   if (state.time >= NIGHT_START) {
@@ -690,10 +688,6 @@ export function advanceChickenTime(state: GameState, dt: number) {
     state.phase = 'day';
   }
 
-  if (oldPhase !== state.phase) {
-    if (state.phase === 'dusk') state.message = '天色压下来，院子边缘有细碎响动。';
-    if (state.phase === 'night') state.message = '夜里彻底黑了，鸡笼的灯还在亮。';
-  }
 }
 
 export function updateNightPressure(state: GameState, context: PressureContext) {
@@ -812,12 +806,11 @@ export function restInHole(state: GameState, hole: HoleEntity, dt: number) {
   hole.lastUsedDay = state.day;
   hole.kind = classifyHole(state, hole);
 
+  const coolingKind = physicalHoleKind(state, hole);
   const cooling =
-    hole.kind === 'cool-pit'
+    coolingKind === 'cool-pit'
       ? 8.5 + hole.depth * 2 + hole.moisture * 5.5
-      : hole.kind === 'safe-rest'
-        ? 5.2 + hole.depth * 1.4
-        : hole.kind === 'dust-bath'
+      : coolingKind === 'dust-bath'
           ? 3
           : 3.6;
   state.heat = clamp(state.heat - cooling * HOLE_HEAT_COOLING_SCALE * seconds, 0, 100);
@@ -861,14 +854,21 @@ function baseHoleMoisture(state: GameState, position: Vec2) {
   return 0.16;
 }
 
-function classifyHole(state: GameState, hole: HoleEntity): HoleTerritoryKind {
+function physicalHoleKind(state: GameState, hole: HoleEntity): Exclude<HoleTerritoryKind, 'safe-rest'> {
   const facility = ownedFacilityAt(state.yard, hole);
   if (facility === 'loose-soil' || (hole.moisture < 0.28 && hole.depth >= 2)) {
     return 'dust-bath';
   }
-  if (state.phase !== 'day' && hole.useSeconds >= 2) return 'safe-rest';
   if (isShadowy(hole) || hole.moisture >= 0.46 || hole.depth >= 3) return 'cool-pit';
   return 'fresh';
+}
+
+function classifyHole(state: GameState, hole: HoleEntity): HoleTerritoryKind {
+  const physicalKind = physicalHoleKind(state, hole);
+  if (state.phase !== 'day' && hole.useSeconds >= 2 && physicalKind === 'fresh') {
+    return 'safe-rest';
+  }
+  return physicalKind;
 }
 
 function holeKindLabel(kind: HoleTerritoryKind) {
@@ -1466,27 +1466,10 @@ function oldRepairCoop(state: GameState) {
 }
 
 export function finishChickenRun(state: GameState, caught: boolean) {
-  state.caughtToday = state.caughtToday || caught;
   if (state.flow.phase === 'chicken-day') {
     applyFlowEvent(state, { type: 'tick', amount: 1 });
   }
-  if (state.flow.phase === 'chicken-dusk') {
-    applyFlowEvent(state, { type: 'call-human' });
-  }
-  if (caught) {
-    addNightPressure(state, CORE_LOOP_TUNING.predatorContactPressure);
-  } else {
-    state.nightPressure = Math.min(state.nightPressure, 50);
-  }
-  state.egg = createEgg(state);
-  state.human = { x: 750, y: 448 };
-  state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 34 };
-  state.chickenWander = { target: null, wait: 0.45, pause: 0.35, facing: 1 };
-  state.reward = null;
-  state.daySummary = createDaySummary(state, 0);
-  state.message = caught
-    ? '黄鼠狼扑了过来，鸡惊叫着逃回笼边。明早先去找蛋。'
-    : '鸡钻回笼里，咯咯地叫了起来。明早先去找蛋。';
+  return finishChickenNight(state, caught);
 }
 
 export function finishChickenNight(state: GameState, caught = false) {
@@ -1912,6 +1895,17 @@ function endingMemoriesFor(state: GameState) {
   ];
 }
 
+function hasNearbyBuriedNightBug(state: GameState) {
+  if (state.flow.phase !== 'chicken-dusk' && state.flow.phase !== 'chicken-night') return false;
+  return state.foods.some(
+    (food) =>
+      food.type === 'nightBug' &&
+      food.buried &&
+      state.time >= food.visibleAt &&
+      distance(food, state.chicken) <= 90,
+  );
+}
+
 function goalTipFor(state: GameState) {
   const tutorial = tutorialForAbility(state.activeAbilityTutorial);
   if (state.mode === 'human') {
@@ -1919,10 +1913,7 @@ function goalTipFor(state: GameState) {
       return '沿着最明显的痕迹，在远端草丛寻找昨夜留下的温热鸡蛋。';
     }
     if (state.flow.phase === 'dusk-human') {
-      if (state.weaselEncounter) {
-        return `空格撒瓜子继续引${state.profile.name}回窝；按住 F 用提灯照退黄鼠狼。`;
-      }
-      return `按空格撒瓜子引${state.profile.name}回鸡舍；门前撒一粒后按 E 开门，进去后再按 E 关门。`;
+      return '黄昏仍由鸡自己行动；回到鸡窝门前按 E 可以休息。';
     }
     if (state.egg && !state.egg.found) return '按空格搜索；没找到时，看鸡朝哪个方向叫。';
     if (state.flow.morningEggFound) return '还可以靠近鸡按 E 抱一抱，或去鸡窝修缮；准备好后到房门口按 E 回屋。';
@@ -1930,11 +1921,14 @@ function goalTipFor(state: GameState) {
   }
   if (state.weaselEncounter) return '黄鼠狼靠近了：听草丛方向，沿熟悉路线冲回鸡窝。';
   if (tutorial) return tutorial.prompt;
+  if (hasNearbyBuriedNightBug(state)) return '脚下泥土在鼓动，按住 E 刨开看看。';
   if (state.flow.phase === 'chicken-dusk') {
-    return '天色正在变暗：到鸡窝门前按 E 可以休息，也可以留下等夜虫出现。';
+    if (distance(state.chicken, COOP_DOOR) < 94) return '鸡舍里有暖光，按 E 就能窝下。';
+    return '鸡舍门口亮着暖光；院子边缘有细小声响。';
   }
   if (state.flow.phase === 'chicken-night') {
-    return '夜里可在鼓动的泥土旁按住 E 挖月光虫；危险时回鸡窝门前按 E。';
+    if (distance(state.chicken, COOP_DOOR) < 94) return '鸡舍里有暖光，按 E 就能窝下。';
+    return '暖光在身后，泥土和草边偶尔响一下。';
   }
   if (state.weasel.active) return '黄鼠狼来了：沿熟悉路线冲回鸡窝。';
   const facility = ownedFacilityAt(state.yard, state.chicken);
@@ -3007,7 +3001,7 @@ function storyPhaseLabel(phase: StoryPhase) {
   if (phase === 'chicken-day') return '白天';
   if (phase === 'chicken-dusk') return '黄昏';
   if (phase === 'chicken-night') return '夜间冒险';
-  if (phase === 'dusk-human') return '黄昏收鸡';
+  if (phase === 'dusk-human') return '黄昏';
   if (phase === 'night-result') return '夜里';
   if (phase === 'epilogue-human') return '清晨的礼物';
   return '归巢之夜';

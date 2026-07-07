@@ -17,6 +17,24 @@ test('game state derives actor and labels from day flow', () => {
   assert.equal(buildHudSnapshot(state, false).phaseLabel, '白天');
 });
 
+test('dusk and night prompts lean on environmental cues instead of escort chores', () => {
+  const state = createGameState();
+  applyFlowEvent(state, { type: 'egg-found' });
+  applyFlowEvent(state, { type: 'return-home' });
+  state.chicken = { x: 700, y: 700 };
+
+  applyFlowEvent(state, { type: 'tick', amount: 0.7 });
+  const duskPrompt = buildHudSnapshot(state, false).contextPrompt;
+  assert.match(duskPrompt, /暖光/);
+  assert.match(duskPrompt, /声响/);
+  assert.doesNotMatch(duskPrompt, /撒瓜子|赶鸡|开门|关门/);
+
+  applyFlowEvent(state, { type: 'tick', amount: 0.2 });
+  const nightPrompt = buildHudSnapshot(state, false).contextPrompt;
+  assert.match(nightPrompt, /暖光/);
+  assert.doesNotMatch(nightPrompt, /撒瓜子|赶鸡|开门|关门/);
+});
+
 test('restores a pre-flow v3 save at the same day in morning human mode', () => {
   const state = restoreGameState({
     day: 3,

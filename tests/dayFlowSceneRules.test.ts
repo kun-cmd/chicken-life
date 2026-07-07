@@ -7,6 +7,7 @@ import {
   debugJumpToDusk,
   debugSetDay,
   finishChickenNight,
+  finishChickenRun,
 } from '../src/game/simulation/state';
 
 test('dusk keeps control on the chicken', () => {
@@ -42,6 +43,18 @@ test('debug dusk jump advances the authoritative flow', () => {
   applyFlowEvent(state, { type: 'return-home' });
   assert.equal(debugJumpToDusk(state), true);
   assert.equal(state.flow.phase, 'chicken-dusk');
+});
+
+test('legacy chicken run ending settles without entering dusk human escort', () => {
+  const state = createGameState();
+  applyFlowEvent(state, { type: 'egg-found' });
+  applyFlowEvent(state, { type: 'return-home' });
+  applyFlowEvent(state, { type: 'tick', amount: 0.7 });
+
+  assert.equal(finishChickenRun(state, false), true);
+  assert.equal(state.flow.phase, 'night-result');
+  assert.equal(state.mode, 'chicken');
+  assert.equal(state.flow.chickenInCoop, true);
 });
 
 test('debug day adjustment starts the selected morning with matching story gates', () => {

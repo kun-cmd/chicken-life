@@ -34,21 +34,8 @@ import {
 import { canUseAbility } from '../../game/systems/abilities';
 import { DAY_ACTIVE_SECONDS, DUSK_AT, NIGHT_AT } from '../../game/systems/dayFlow';
 import {
-  COOP_FINAL_SEED_RANGE,
-  HOME_CALL_HOLD_INTERVAL,
-  LURE_SEED_MOVE_SPEED,
-  advanceDuskCollection,
-  canCloseCoopDoor,
   createDuskCollectionState,
-  eatLureSeed,
-  expireHomeCall,
-  findLureSeedTarget,
-  markChickenInside,
-  openCoopDoor,
-  placeLureSeed,
-  registerHomeCluck,
   visionRadiusFor,
-  type LureSeed,
 } from '../../game/systems/duskCollection';
 import {
   LEGACY_SAVE_KEY,
@@ -78,7 +65,6 @@ import {
   drinkAtWaterSource,
   expireFoods,
   finishChickenNight,
-  finishNightResult,
   improveCoopAbility,
   isFoodLockedByAnimal,
   isNearLight,
@@ -116,8 +102,6 @@ import {
   FACILITY_IDLE_SECONDS,
   advanceFacilityActivity,
   buyUpgrade,
-  coopEntryRadius,
-  doorCloseDurationMs,
   ownedFacilityAt,
   startFacilityActivity,
 } from '../../game/systems/yardUpgrades';
@@ -126,7 +110,6 @@ import {
   isHumanBlocking,
   updateWeaselEncounter as advanceWeaselEncounter,
 } from '../../game/systems/weaselEncounter';
-import { hasWeaselEncounter } from '../../game/systems/weaselSchedule';
 
 type FoodView = Phaser.GameObjects.Image & { foodId: number };
 type AnimalView = Phaser.GameObjects.Image & { animalId: number; animalType: YardAnimal['type'] };
@@ -248,6 +231,7 @@ export class GameScene extends Phaser.Scene {
   private eggClueSoundCooldown = 0;
   private eggDirectionTimer = 0;
   private rustleSfxCooldown = 0;
+  private nightAmbienceCooldown = 0;
   private humanFacingDirection: Vec2 = { x: 0, y: 1 };
   private chickenLiftTimer = 0;
   private chickenWalkPhase = 0;
@@ -266,7 +250,6 @@ export class GameScene extends Phaser.Scene {
   private closeInteractionAnimating = false;
   private closeInteractionTimer: Phaser.Time.TimerEvent | null = null;
   private yardPanelOpen = false;
-  private coopDoorClosing = false;
   private finaleRetryOpen = false;
 
   private handleGameplayKeyDown = (event: KeyboardEvent) => {
@@ -432,7 +415,6 @@ export class GameScene extends Phaser.Scene {
     if (detail.action === 'setDay') {
       debugSetDay(this.state, detail.day);
       this.duskCollection = createDuskCollectionState();
-      this.coopDoorClosing = false;
       this.clearDuskSeedViews();
       this.clearHouseResponseLight();
       this.resetGameplayKeys();
@@ -518,23 +500,22 @@ export class GameScene extends Phaser.Scene {
       finishChickenNight(this.state, false);
       this.nightResultTimer = 0.2;
       this.chicken.setVisible(false);
+      this.syncCoopDoorView();
       this.state.message = '调试：鸡已自行回窝，进入夜间结算。';
       this.emitHud(true, true);
       return;
     }
     if (phase === 'dusk-human') {
-      if (!this.state.flow.chickenInCoop) {
-        applyFlowEvent(this.state, { type: 'chicken-entered-coop' });
-      }
-      this.duskCollection.phase = 'inside';
       if (this.state.weaselEncounter) resolveWeaselOutcome(this.state, 'safe');
-      applyFlowEvent(this.state, { type: 'close-door' });
-      finishNightResult(this.state);
+      this.state.flow.phase = 'chicken-dusk';
+      this.state.mode = 'chicken';
+      this.state.phase = 'dusk';
+      finishChickenNight(this.state, false);
       this.nightResultTimer = 0.2;
       this.chicken.setVisible(false);
       this.clearDuskSeedViews();
       this.syncCoopDoorView();
-      this.state.message = '调试：已跳过赶鸡，进入夜间结算。';
+      this.state.message = '调试：鸡已自行回窝，进入夜间结算。';
       this.emitHud(true, true);
       return;
     }
@@ -670,6 +651,7 @@ export class GameScene extends Phaser.Scene {
       this.updateChicken(dt, actions);
     }
 
+    this.updateAmbientNightCues(dt);
     this.updateSprites(dt);
     this.updateWeatherView(time);
     this.updateNightVeil(time);
@@ -785,6 +767,7 @@ export class GameScene extends Phaser.Scene {
         this.nightResultTimer = 2.1;
         this.chicken.setVisible(false);
         this.weasel.setVisible(false);
+        this.syncCoopDoorView();
         this.emitHud(true, true);
       }
       return;
@@ -937,6 +920,54 @@ export class GameScene extends Phaser.Scene {
     if (relief > 0) this.playSfx(SFX_REWARD_KEY, 0.32);
   }
 
+  private updateAmbientNightCues(dt: number) {
+    const phase = this.state.flow.phase;
+    const active = phase === 'chicken-dusk' || phase === 'chicken-night';
+    if (!active || this.state.weaselEncounter) {
+      this.nightAmbienceCooldown = 0;
+      return;
+    }
+
+    this.nightAmbienceCooldown = Math.max(0, this.nightAmbienceCooldown - dt);
+    if (this.nightAmbienceCooldown > 0) return;
+
+    const point = this.pickNightAmbiencePoint();
+    if (point) {
+      this.showNightAmbienceFx(point);
+      this.playSfx(SFX_NIGHT_RUSTLE_KEY, phase === 'chicken-night' ? 0.15 : 0.09);
+    }
+    this.nightAmbienceCooldown =
+      phase === 'chicken-night'
+        ? Phaser.Math.FloatBetween(4.2, 7.5)
+        : Phaser.Math.FloatBetween(6.5, 11);
+  }
+
+  private pickNightAmbiencePoint(): Vec2 {
+    const buriedBugs = this.state.foods.filter(
+      (food) =>
+        food.type === 'nightBug' &&
+        food.buried &&
+        this.state.time >= food.visibleAt &&
+        distance(food, this.state.chicken) > 110,
+    );
+    if (buriedBugs.length > 0) {
+      const food = buriedBugs[Phaser.Math.Between(0, buriedBugs.length - 1)];
+      return {
+        x: Phaser.Math.Clamp(food.x + Phaser.Math.Between(-18, 18), 36, WORLD_WIDTH - 36),
+        y: Phaser.Math.Clamp(food.y + Phaser.Math.Between(-14, 14), 36, WORLD_HEIGHT - 36),
+      };
+    }
+
+    let point = this.randomEdgePoint();
+    for (let i = 0; i < 7; i += 1) {
+      const candidate = this.randomEdgePoint();
+      if (distance(candidate, this.state.chicken) > distance(point, this.state.chicken)) {
+        point = candidate;
+      }
+    }
+    return point;
+  }
+
   private handleHeldHoleRest(dt: number, hole: HoleEntity) {
     const activeSeconds = dt * 0.72;
     if (this.state.facilityLife.activity !== 'hole-rest') {
@@ -1076,37 +1107,6 @@ export class GameScene extends Phaser.Scene {
     return { actionSeconds, diggingSeconds, huntingSeconds };
   }
 
-  private performHomeCluck() {
-    const result = cluckAt(this.state, this.state.chicken);
-    for (const droppedFood of result.droppedFoods) {
-      this.foodViews.set(droppedFood.id, this.createFoodView(droppedFood));
-      this.showScatterFx(droppedFood);
-    }
-    this.showCluckFx(this.state.chicken, result.scaredIds.length);
-    this.scareAnimalViews(result.scaredIds);
-
-    const event = registerHomeCluck(this.duskCollection.homeCall, this.time.now / 1000);
-    if (event === 'heard') {
-      this.showHouseResponseFx('heard');
-      this.playSfx(SFX_REWARD_KEY, 0.28);
-      this.state.message = `屋里亮起了灯：“听见了，${this.state.profile.name}——”`;
-      return false;
-    }
-    if (event === 'door-open') {
-      this.showHouseResponseFx('door-open');
-      this.playSfx(SFX_UPGRADE_KEY, 0.34);
-      this.state.human = {
-        x: HOUSE.x + HOUSE.width * 0.5,
-        y: HOUSE.y + HOUSE.height + 58,
-      };
-      applyFlowEvent(this.state, { type: 'call-human' });
-      this.state.message = `房门打开了，养鸡人提着灯出来接${this.state.profile.name}。`;
-      this.switchToHuman();
-      return true;
-    }
-    return false;
-  }
-
   private advanceChickenWorld(actionSeconds: number) {
     if (actionSeconds <= 0) return;
     const previousCheckpoint = this.state.finaleCheckpointJson;
@@ -1135,16 +1135,6 @@ export class GameScene extends Phaser.Scene {
     ) {
       return;
     }
-    if (
-      !hasWeaselEncounter(
-        this.state.weaselSchedule,
-        this.state.day,
-        this.state.profile.runSeed,
-      )
-    ) {
-      return;
-    }
-
     const duskSpan = Math.max(0.1, (NIGHT_AT - DUSK_AT) * DAY_ACTIVE_SECONDS);
     const baseRate = 100 / duskSpan;
     const multiplier = this.weaselApproachMultiplier(sprinting);
@@ -1254,7 +1244,11 @@ export class GameScene extends Phaser.Scene {
     const houseDoor = { x: HOUSE.x + HOUSE.width * 0.5, y: HOUSE.y + HOUSE.height + 24 };
     const nearHouseDoor = distance(this.state.human, houseDoor) < 112;
     if (this.state.flow.phase === 'dusk-human') {
-      this.updateDuskCollection(dt, actions, nearCoop);
+      this.state.flow.phase = 'chicken-dusk';
+      this.state.mode = 'chicken';
+      this.state.phase = 'dusk';
+      this.state.message = '黄昏仍由鸡自己行动；鸡窝门前按 E 可以休息。';
+      this.switchToChicken();
       return;
     }
 
@@ -1376,126 +1370,8 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private updateDuskCollection(dt: number, actions: InputActions, humanNearCoop: boolean) {
-    advanceDuskCollection(this.duskCollection, dt);
-    this.state.handLanternActive = this.keyboardState.isDown('KeyF');
-    if (this.updateRealtimeThreats(dt)) return;
-    if (this.coopDoorClosing) return;
-
-    if (actions.peckPressed) {
-      const seed = placeLureSeed(
-        this.duskCollection,
-        this.state.human,
-        distance(this.state.human, COOP_DOOR) <= COOP_FINAL_SEED_RANGE,
-      );
-      if (seed) {
-        this.createDuskSeedView(seed);
-        if (this.duskCollection.doorSeedPlaced && distance(seed, COOP_DOOR) <= COOP_FINAL_SEED_RANGE) {
-          this.state.message = '瓜子落在鸡舍门前。等鸡走近后，到门边按 E 开门。';
-        }
-      }
-    }
-
-    if (actions.interactPressed) {
-      if (!humanNearCoop) {
-        this.state.message = '开关鸡舍门需要站在门边。';
-      } else if (canCloseCoopDoor(this.duskCollection)) {
-        this.startCoopDoorClose();
-        return;
-      } else if (this.duskCollection.phase === 'coop-open') {
-        this.state.message = `${this.state.profile.name}还在进窝，先等它跨过门槛。`;
-      } else if (!this.duskCollection.doorSeedPlaced) {
-        this.state.message = '先在鸡舍门前按空格撒一粒瓜子。';
-      } else if (!this.duskCollection.doorSeedEaten) {
-        this.state.message = `等${this.state.profile.name}吃到门前那粒瓜子，再开门。`;
-      } else if (openCoopDoor(this.duskCollection)) {
-        this.syncCoopDoorView();
-        this.state.message = `鸡舍门打开了，${this.state.profile.name}会自己进去。`;
-      }
-    }
-
-    if (this.duskCollection.phase === 'inside' || this.duskCollection.eatPause > 0) return;
-
-    if (this.duskCollection.phase === 'coop-open') {
-      const towardDoor = normalize(
-        COOP_DOOR.x - this.state.chicken.x,
-        COOP_DOOR.y - this.state.chicken.y,
-      );
-      this.tryMoveDuskChicken(towardDoor, LURE_SEED_MOVE_SPEED, dt);
-      if (
-        distance(this.state.chicken, COOP_DOOR) < coopEntryRadius(this.state.yard) &&
-        markChickenInside(this.duskCollection)
-      ) {
-        applyFlowEvent(this.state, { type: 'chicken-entered-coop' });
-        this.clearDuskSeedViews();
-        this.chicken.setVisible(false);
-        this.state.message = `${this.state.profile.name}跨过门槛进窝了。到门边按 E 关门。`;
-      }
-      return;
-    }
-
-    const seed = findLureSeedTarget(
-      this.duskCollection,
-      this.state.chicken,
-      visionRadiusFor(this.state.affection),
-    );
-    if (!seed) {
-      updateIdleChickenWander(this.state, dt, false);
-      return;
-    }
-
-    this.state.chickenWander.target = null;
-    this.state.chickenWander.wait = 0.35;
-    const towardSeed = normalize(seed.x - this.state.chicken.x, seed.y - this.state.chicken.y);
-    this.tryMoveDuskChicken(towardSeed, LURE_SEED_MOVE_SPEED, dt);
-    if (distance(this.state.chicken, seed) < 18 && eatLureSeed(this.duskCollection, seed.id)) {
-      this.duskSeedViews.get(seed.id)?.destroy();
-      this.duskSeedViews.delete(seed.id);
-      this.playSfx(SFX_PECK_KEY, 0.38);
-    }
-  }
-
-  private startCoopDoorClose() {
-    this.coopDoorClosing = true;
-    this.resetGameplayKeys();
-    const doorCenter = { x: COOP.x + 50, y: COOP.y + 107 };
-    const duration = doorCloseDurationMs(this.state.yard);
-    this.state.message = '你扶住鸡舍门，慢慢把它合上。';
-    this.emitHud(true);
-    this.tweens.add({
-      targets: this.coopDoorPanel,
-      x: doorCenter.x,
-      duration,
-      ease: 'Sine.easeInOut',
-      onComplete: () => {
-        if (this.state.weaselEncounter && this.duskCollection.phase === 'inside') {
-          resolveWeaselOutcome(this.state, 'safe');
-          this.weasel.setVisible(false);
-        }
-        applyFlowEvent(this.state, { type: 'close-door' });
-        finishNightResult(this.state);
-        this.nightResultTimer = 2.4;
-        this.coopDoorClosing = false;
-        this.syncCoopDoorView();
-        this.emitHud(true, true);
-      },
-    });
-  }
-
-  private tryMoveDuskChicken(direction: Vec2, speed: number, dt: number) {
-    if (!direction.x && !direction.y) return;
-    const target = {
-      x: this.state.chicken.x + direction.x * speed * dt,
-      y: this.state.chicken.y + direction.y * speed * dt,
-    };
-    if (isBlocked(target, 18)) return;
-    this.state.chicken = target;
-    if (Math.abs(direction.x) > 0.05) this.state.chickenWander.facing = direction.x > 0 ? 1 : -1;
-  }
-
   private switchToHuman() {
     this.duskCollection = createDuskCollectionState();
-    this.coopDoorClosing = false;
     this.eggClueSoundCooldown = 0;
     this.eggDirectionTimer = 0;
     this.state.handLanternActive = false;
@@ -1517,7 +1393,6 @@ export class GameScene extends Phaser.Scene {
 
   private switchToChicken() {
     this.duskCollection = createDuskCollectionState();
-    this.coopDoorClosing = false;
     this.state.handLanternActive = false;
     this.clearEggClueView();
     this.clearDuskSeedViews();
@@ -1643,16 +1518,7 @@ export class GameScene extends Phaser.Scene {
     if (this.state.weaselEncounterDoneToday) return;
     const weaselPhase =
       this.state.flow.phase === 'chicken-dusk' || this.state.flow.phase === 'chicken-night';
-    if (
-      !force &&
-      (!weaselPhase ||
-        this.state.weaselApproach < 100 ||
-        !hasWeaselEncounter(
-          this.state.weaselSchedule,
-          this.state.day,
-          this.state.profile.runSeed,
-        ))
-    ) {
+    if (!force && (!weaselPhase || this.state.weaselApproach < 100)) {
       return;
     }
     const point = this.pickWeaselSpawnPoint();
@@ -1884,18 +1750,13 @@ export class GameScene extends Phaser.Scene {
     const storyPhase = this.state.flow.phase;
     const open =
       storyPhase === 'chicken-day' ||
-      (storyPhase === 'dusk-human' &&
-        (this.duskCollection.phase === 'coop-open' || this.duskCollection.phase === 'inside'));
+      storyPhase === 'chicken-dusk' ||
+      storyPhase === 'chicken-night';
+    const warmOpen = storyPhase === 'chicken-dusk' || storyPhase === 'chicken-night';
     this.coopDoorInterior.setVisible(open);
+    this.coopDoorInterior.setFillStyle(warmOpen ? 0x3f2a1d : 0x241d1a, warmOpen ? 0.98 : 0.94);
     this.coopDoorPanel.setPosition(open ? doorCenter.x - 48 : doorCenter.x, doorCenter.y);
     this.coopDoorPanel.setFillStyle(open ? 0x6f422d : 0x8a5435, 1);
-  }
-
-  private createDuskSeedView(seed: LureSeed) {
-    this.duskSeedViews.set(
-      seed.id,
-      this.add.image(seed.x, seed.y, 'food-sunflower-0').setDepth(48).setScale(0.58),
-    );
   }
 
   private clearDuskSeedViews() {
@@ -1915,6 +1776,32 @@ export class GameScene extends Phaser.Scene {
       duration: 520,
       ease: 'Sine.easeOut',
       onComplete: () => rustle.destroy(),
+    });
+  }
+
+  private showNightAmbienceFx(position: Vec2) {
+    const ripple = this.add
+      .circle(position.x, position.y, 10, 0x8fb7ff, 0.05)
+      .setStrokeStyle(2, 0xa9caff, 0.24)
+      .setDepth(62);
+    const glint = this.add
+      .circle(position.x + Phaser.Math.Between(-8, 8), position.y - 6, 3, 0xc8ddff, 0.38)
+      .setDepth(63);
+    this.tweens.add({
+      targets: ripple,
+      scale: 1.8,
+      alpha: 0,
+      duration: 820,
+      ease: 'Sine.easeOut',
+      onComplete: () => ripple.destroy(),
+    });
+    this.tweens.add({
+      targets: glint,
+      y: glint.y - 9,
+      alpha: 0,
+      duration: 620,
+      ease: 'Sine.easeOut',
+      onComplete: () => glint.destroy(),
     });
   }
 
@@ -2853,6 +2740,16 @@ export class GameScene extends Phaser.Scene {
       this.nightVeil.fillRect(view.x - 4, view.y + view.height - edge + 4, view.width + 8, edge);
       this.nightVeil.fillRect(view.x - 4, view.y - 4, edge, view.height + 8);
       this.nightVeil.fillRect(view.x + view.width - edge + 4, view.y - 4, edge, view.height + 8);
+    }
+
+    if (storyPhase === 'chicken-dusk' || storyPhase === 'chicken-night') {
+      const pulse = 0.5 + Math.sin(time / 620) * 0.5;
+      const wideRadius = (storyPhase === 'chicken-night' ? 178 : 140) / camera.zoom;
+      const coreRadius = (storyPhase === 'chicken-night' ? 62 : 48) / camera.zoom;
+      this.nightVeil.fillStyle(0xffc974, 0.1 + pulse * 0.035);
+      this.nightVeil.fillCircle(COOP_DOOR.x, COOP_DOOR.y + 4, wideRadius);
+      this.nightVeil.fillStyle(0xffefbd, 0.13 + pulse * 0.045);
+      this.nightVeil.fillCircle(COOP_DOOR.x, COOP_DOOR.y + 6, coreRadius);
     }
 
     if (this.state.mode === 'chicken' && darkness > 0) {

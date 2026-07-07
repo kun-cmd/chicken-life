@@ -144,6 +144,28 @@ test('scratching the same place deepens a remembered cooling hole', () => {
   assert.equal(state.holes.length, 1);
 });
 
+test('holes cool the same at night as they do in the day', () => {
+  const makeRestingState = (night: boolean) => {
+    const state = createGameState();
+    state.weather = 'sunny';
+    applyFlowEvent(state, { type: 'egg-found' });
+    applyFlowEvent(state, { type: 'return-home' });
+    if (night) applyFlowEvent(state, { type: 'tick', amount: 1 });
+    const hole = digHole(state, { x: 430, y: 720 });
+    assert.ok(hole);
+    hole.depth = 3;
+    hole.moisture = 0.55;
+    state.heat = 80;
+    restInHole(state, hole, 2.4);
+    return state.heat;
+  };
+
+  const dayHeat = makeRestingState(false);
+  const nightHeat = makeRestingState(true);
+
+  assert.equal(nightHeat, dayHeat);
+});
+
 test('food raises egg momentum at the slower tuned rate', () => {
   const state = createGameState();
   state.nutrition = 0;
