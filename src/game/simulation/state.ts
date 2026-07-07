@@ -389,6 +389,8 @@ const DUSK_START = 0.58;
 const NIGHT_START = 0.82;
 const KEEPER_FEED_END = 0.25;
 const NUTRITION_LIMIT = 100;
+const FOOD_NUTRITION_GAIN_SCALE = 0.85;
+const HOLE_HEAT_COOLING_SCALE = 1.4;
 const DIG_SPRINT_COST = 28;
 const WATER_BOOST_LIMIT = 100;
 const WATER_BOOST_DURATION = DAY_SECONDS / 3;
@@ -814,7 +816,7 @@ export function restInHole(state: GameState, hole: HoleEntity, dt: number) {
         : hole.kind === 'dust-bath'
           ? 3
           : 3.6;
-  state.heat = clamp(state.heat - cooling * seconds, 0, 100);
+  state.heat = clamp(state.heat - cooling * HOLE_HEAT_COOLING_SCALE * seconds, 0, 100);
   state.foraging.sprintEnergy = clamp(
     state.foraging.sprintEnergy + (3.5 + hole.depth * 1.1) * seconds,
     0,
@@ -3047,15 +3049,19 @@ function foodUnlockHint(type: FoodType) {
 }
 
 function nutritionFor(type: FoodType) {
-  if (type === 'grain') return 3;
-  if (type === 'grass') return 2;
-  if (type === 'bug' || type === 'worm') return 5;
-  if (type === 'cricket') return 7;
-  if (type === 'beetle') return 10;
-  if (type === 'berry') return 6;
-  if (type === 'sunflower') return 6;
-  if (type === 'meat') return 12;
-  return 13;
+  if (type === 'grain') return scaledNutritionGain(3);
+  if (type === 'grass') return scaledNutritionGain(2);
+  if (type === 'bug' || type === 'worm') return scaledNutritionGain(5);
+  if (type === 'cricket') return scaledNutritionGain(7);
+  if (type === 'beetle') return scaledNutritionGain(10);
+  if (type === 'berry') return scaledNutritionGain(6);
+  if (type === 'sunflower') return scaledNutritionGain(6);
+  if (type === 'meat') return scaledNutritionGain(12);
+  return scaledNutritionGain(13);
+}
+
+function scaledNutritionGain(gain: number) {
+  return Math.max(1, Math.round(gain * FOOD_NUTRITION_GAIN_SCALE));
 }
 
 function foodDiscoveryEffect(type: ForagingFoodType, restored: number) {

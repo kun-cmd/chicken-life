@@ -15,6 +15,7 @@ import {
   buildHudSnapshot,
   createGameState,
   digHole,
+  eatFood,
   restInHole,
   updateNightPressure,
 } from '../src/game/simulation/state';
@@ -139,6 +140,23 @@ test('scratching the same place deepens a remembered cooling hole', () => {
 
   state.heat = 80;
   restInHole(state, second, 2);
-  assert.ok(state.heat < 80);
+  assert.ok(state.heat <= 69);
   assert.equal(state.holes.length, 1);
+});
+
+test('food raises egg momentum at the slower tuned rate', () => {
+  const state = createGameState();
+  state.nutrition = 0;
+  const food = {
+    id: 999,
+    x: state.chicken.x,
+    y: state.chicken.y,
+    type: 'grain' as const,
+    visibleAt: 0,
+  };
+  state.foods.push(food);
+
+  eatFood(state, food);
+
+  assert.equal(state.nutrition, 3);
 });
