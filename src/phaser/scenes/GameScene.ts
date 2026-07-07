@@ -747,6 +747,7 @@ export class GameScene extends Phaser.Scene {
       advanceChickenHeat(this.state, activeSeconds, {
         sprinting: true,
         moving: true,
+        exertion: true,
         inShade: false,
         drinking: false,
         raining: this.state.weather === 'rain',
@@ -872,6 +873,7 @@ export class GameScene extends Phaser.Scene {
         advanceChickenHeat(this.state, diggingSeconds, {
           sprinting: false,
           moving: true,
+          exertion: true,
           inShade: false,
           drinking: false,
           raining: this.state.weather === 'rain',
@@ -882,6 +884,7 @@ export class GameScene extends Phaser.Scene {
         advanceChickenHeat(this.state, huntingSeconds, {
           sprinting: false,
           moving: true,
+          exertion: true,
           inShade: false,
           drinking: false,
           raining: this.state.weather === 'rain',
