@@ -86,6 +86,11 @@ import {
   type YardUpgradeState,
 } from '../systems/yardUpgrades';
 import {
+  createYardFamiliarityState,
+  restoreYardFamiliarityState,
+  type YardFamiliarityState,
+} from '../systems/yardFamiliarity';
+import {
   type WeaselEncounterState,
   type WeaselOutcome,
 } from '../systems/weaselEncounter';
@@ -268,6 +273,7 @@ export interface GameState {
   coopSafety: number;
   yard: YardUpgradeState;
   facilityLife: FacilityLifeState;
+  yardFamiliarity: YardFamiliarityState;
   weatherCalendar: Weather[];
   weather: Weather;
   offPathRainSeconds: number;
@@ -469,6 +475,7 @@ export function createGameState(): GameState {
     coopSafety: 0,
     yard: createYardUpgradeState(),
     facilityLife: createFacilityLifeState(),
+    yardFamiliarity: createYardFamiliarityState(),
     weatherCalendar,
     weather: weatherCalendar[0],
     offPathRainSeconds: 0,
@@ -2083,6 +2090,7 @@ export function restoreGameState(saved: unknown): GameState {
       ...createFacilityLifeState(),
       restedToday: input.facilityLife?.restedToday ?? false,
     },
+    yardFamiliarity: restoreYardFamiliarityState(input.yardFamiliarity),
     weatherCalendar:
       Array.isArray(input.weatherCalendar) &&
       input.weatherCalendar.length === 14 &&

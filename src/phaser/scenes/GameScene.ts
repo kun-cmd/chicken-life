@@ -108,6 +108,11 @@ import {
   startFacilityActivity,
 } from '../../game/systems/yardUpgrades';
 import {
+  movementFamiliarityScale,
+  recordRegionExploration,
+  markTipShownForRegion,
+} from '../../game/systems/yardFamiliarity';
+import {
   createWeaselEncounter,
   isHumanBlocking,
   updateWeaselEncounter as advanceWeaselEncounter,
@@ -789,7 +794,8 @@ export class GameScene extends Phaser.Scene {
       (canSprint
         ? this.state.body.sprintMultiplier * chickenSprintScaleForHeat(this.state)
         : 1) *
-      (isOnPath(this.state.chicken) ? 1.06 : 1);
+      (isOnPath(this.state.chicken) ? 1.06 : 1) *
+      movementFamiliarityScale(this.state.yardFamiliarity, this.state.chicken);
 
     if (hasMove) {
       const target = {
@@ -852,6 +858,29 @@ export class GameScene extends Phaser.Scene {
       ownedFacilityAt(this.state.yard, this.state.chicken) === 'shade-shelter' ||
       holeRestSeconds > 0;
     if (actionSeconds > 0) {
+      if (hasMove) {
+        const explored = recordRegionExploration(
+          this.state.yardFamiliarity,
+          this.state.chicken,
+          actionSeconds,
+          this.state.flow.day,
+        );
+        if (explored.canShowTip) {
+          const tipMsgs: Record<string, string> = {
+            'pond-bank': '鸡伸长脖子，歪着头听池塘边的水声。',
+            'tree-shade': '鸡在树荫下停了一下，警惕地四处张望。',
+            'coop-yard': '鸡在鸡舍附近踱步，不时回头看看。',
+            'outer-growth': '鸡钻进杂草丛，小心翼翼地探路。',
+            'main-path': '鸡在小路上站定，确认四周安全。',
+            'house-yard': '鸡靠近屋子，谨慎地打量着这片区域。',
+          };
+          const tip = tipMsgs[explored.region];
+          if (tip && !this.state.message) {
+            this.state.message = tip;
+          }
+          markTipShownForRegion(this.state.yardFamiliarity, explored.region);
+        }
+      }
       this.updateMovingFoods(actionSeconds);
       if (updateWeatherExposure(this.state, actionSeconds)) {
         this.state.message = '雨水把泥地打湿了，鸡爪和腹羽都沾上了一点泥。';
