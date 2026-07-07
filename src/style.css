@@ -516,7 +516,44 @@ body {
 }
 
 .pressure-wrap .meter-track {
+  height: 12px;
   overflow: hidden;
+}
+
+.egg-pressure-track {
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0 34.5%,
+      rgba(255, 246, 214, 0.48) 34.5% 35.5%,
+      transparent 35.5% 69.5%,
+      rgba(255, 246, 214, 0.48) 69.5% 70.5%,
+      transparent 70.5% 100%
+    ),
+    linear-gradient(90deg, rgba(3, 7, 8, 0.36), rgba(3, 7, 8, 0.46));
+}
+
+.egg-pressure-track::before,
+.egg-pressure-track::after {
+  position: absolute;
+  top: 1px;
+  z-index: 4;
+  color: rgba(255, 246, 214, 0.82);
+  font-size: 8px;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.egg-pressure-track::before {
+  left: 35%;
+  content: '35';
+}
+
+.egg-pressure-track::after {
+  left: 70%;
+  content: '70';
 }
 
 .pressure-wrap .meter-track i {
@@ -536,6 +573,37 @@ body {
   z-index: 2;
   background: linear-gradient(90deg, #3e2256, #090511);
   box-shadow: -7px 0 12px rgba(31, 10, 48, 0.24);
+}
+
+.egg-pressure-guide {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  margin-top: -2px;
+  color: rgba(255, 246, 214, 0.72);
+  font-size: 9px;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.egg-pressure-guide span {
+  overflow: hidden;
+  padding: 2px 1px;
+  border: 1px solid rgba(255, 246, 214, 0.1);
+  border-radius: 4px;
+  background: rgba(3, 7, 8, 0.18);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.egg-pressure-current {
+  display: block;
+  overflow: hidden;
+  color: rgba(255, 246, 214, 0.68);
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .time-capsule {

@@ -5,6 +5,7 @@ import type { HudSnapshot } from './game/simulation/state';
 import { YARD_UPGRADES } from './game/content/yardUpgrades';
 import { foodDisplayName, type ForagingFoodType } from './game/systems/foraging';
 import type { TouchOption } from './game/systems/closeInteraction';
+import { eggQualityLabel } from './game/systems/eggEconomy';
 
 interface CloseInteractionOpenDetail {
   chickenName: string;
@@ -80,6 +81,7 @@ const hud = {
   pressureWrap: document.querySelector<HTMLElement>('#pressureWrap')!,
   nutritionMeter: document.querySelector<HTMLElement>('#nutritionMeter')!,
   pressureMeter: document.querySelector<HTMLElement>('#pressureMeter')!,
+  eggPressureCurrent: document.querySelector<HTMLElement>('#eggPressureCurrent')!,
   contextPrompt: document.querySelector<HTMLElement>('#contextPrompt')!,
   toast: document.querySelector<HTMLElement>('#toast')!,
   rewardPanel: document.querySelector<HTMLElement>('#rewardPanel')!,
@@ -170,7 +172,10 @@ function renderHud(snapshot: HudSnapshot) {
   hud.pressureWrap.hidden = !snapshot.showPressure;
   hud.nutritionMeter.style.width = `${snapshot.nutritionPct}%`;
   hud.pressureMeter.style.width = `${snapshot.pressurePct}%`;
-  hud.pressureWrap.title = `有效营养 ${snapshot.effectiveNutrition} / 原始营养 ${snapshot.nutrition}，夜压 ${snapshot.pressure}`;
+  hud.pressureWrap.dataset.quality = snapshot.projectedEggQuality;
+  hud.pressureWrap.dataset.score = String(snapshot.eggQualityScore);
+  hud.eggPressureCurrent.textContent = eggPressureText(snapshot);
+  hud.pressureWrap.title = `当前 ${eggQualityLabel(snapshot.projectedEggQuality)}：蛋势 ${snapshot.eggQualityScore}/4；有效营养 ${snapshot.effectiveNutrition} / 原始营养 ${snapshot.nutrition}，夜压 ${snapshot.pressure}`;
   hud.contextPrompt.textContent = snapshot.contextPrompt;
   if (document.activeElement !== hud.debugAffection) {
     hud.debugAffection.value = String(snapshot.affection);
@@ -203,6 +208,25 @@ function renderHud(snapshot: HudSnapshot) {
       hud.rewardPanel.hidden = true;
     }, 3600);
   }
+}
+
+function eggPressureText(snapshot: HudSnapshot) {
+  const quality = eggQualityLabel(snapshot.projectedEggQuality);
+  const facts = [
+    snapshot.effectiveNutrition >= 35 ? '35✓' : `差${Math.max(0, 35 - snapshot.effectiveNutrition)}到35`,
+    snapshot.effectiveNutrition >= 70 ? '70✓' : `差${Math.max(0, 70 - snapshot.effectiveNutrition)}到70`,
+    snapshot.eggWildKinds > 0 ? '野味✓' : '缺野味',
+    snapshot.eggDryRest ? '干燥✓' : '待干燥休息',
+  ];
+  const next =
+    snapshot.eggQualityScore <= 1
+      ? '2点=普通蛋'
+      : snapshot.eggQualityScore === 2
+        ? '3点=较好蛋'
+        : snapshot.eggQualityScore === 3
+          ? '4点=好蛋'
+          : '已到好蛋';
+  return `当前 ${quality} ${snapshot.eggQualityScore}/4 · ${facts.join(' / ')} · ${next}`;
 }
 
 function renderEnding(snapshot: HudSnapshot) {

@@ -375,6 +375,10 @@ export interface HudSnapshot {
   yard: YardUpgradeState;
   currentEggQuality: EggQuality | null;
   currentEggBudget: number;
+  projectedEggQuality: EggQuality;
+  eggQualityScore: number;
+  eggWildKinds: number;
+  eggDryRest: boolean;
   daySummary: DaySummary | null;
   goalTip: string;
   forcedEggType: EggType | null;
@@ -1795,6 +1799,11 @@ export function startNextDay(state: GameState) {
 
 export function buildHudSnapshot(state: GameState, consumeTransient = true): HudSnapshot {
   const nutritionPressure = nutritionPressureFor(state);
+  const projectedEgg = evaluateEggQuality({
+    nutrition: nutritionPressure.effectiveNutrition,
+    foodsEaten: state.foraging.foodsEatenToday,
+    dryRest: state.dryRestTonight,
+  });
   const snapshot: HudSnapshot = {
     chickenName: state.profile.name,
     requiresNaming: !state.profile.named,
@@ -1846,6 +1855,10 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     },
     currentEggQuality: state.egg?.quality ?? null,
     currentEggBudget: state.egg?.budget ?? 0,
+    projectedEggQuality: projectedEgg.quality,
+    eggQualityScore: projectedEgg.score,
+    eggWildKinds: projectedEgg.wildKinds,
+    eggDryRest: state.dryRestTonight,
     daySummary: state.daySummary ? { ...state.daySummary, eaten: { ...state.daySummary.eaten } } : null,
     goalTip: goalTipFor(state),
     forcedEggType: state.forcedEggType,
