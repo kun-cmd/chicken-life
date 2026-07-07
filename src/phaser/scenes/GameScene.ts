@@ -3,6 +3,7 @@ import {
   BLOCKERS,
   COOP,
   COOP_DOOR,
+  EGG_HIDE_AREAS,
   FOOD_SPAWN_POINTS,
   FLUTTER_TARGETS,
   HOUSE,
@@ -1181,8 +1182,7 @@ export class GameScene extends Phaser.Scene {
       illuminated: false,
       humanBlocking: false,
       contactEnabled: this.caughtCooldown <= 0,
-      retreatTarget: this.farthestWeaselSpawnPoint(),
-      speedScale: this.state.day <= 3 ? 0.78 : 1,
+      speedScale: this.state.day <= 3 ? 0.92 : 1,
     });
     this.state.weaselEncounter = result.state;
 
@@ -1527,29 +1527,50 @@ export class GameScene extends Phaser.Scene {
       y: Phaser.Math.Clamp(point.y, 30, WORLD_HEIGHT - 30),
     };
     this.state.weaselApproach = 100;
-    this.state.weaselEncounter = createWeaselEncounter(position, force ? 0.35 : 1.05);
+    this.state.weaselEncounter = createWeaselEncounter(position, force ? 0.18 : 0.42);
     this.rustleSfxCooldown = 0;
     this.weasel.setVisible(false);
     this.showWeaselRustleFx(position);
     if (force) {
       this.playSfx(SFX_NIGHT_RUSTLE_KEY, 0.34);
-      this.state.message = '调试：院墙边的草忽然动了。';
+      this.state.message = '调试：附近草丛里钻出了一只黄鼠狼。';
     }
   }
 
   private pickWeaselSpawnPoint(): Vec2 {
-    let best = { x: 30, y: WORLD_HEIGHT - 30 };
-    let bestDistance = 0;
-    for (let i = 0; i < 36; i += 1) {
-      const point = this.randomEdgePoint();
-      const d = distance(point, this.state.chicken);
-      if (this.isBadWeaselSpawn(point)) continue;
-      if (d > bestDistance) {
-        best = point;
-        bestDistance = d;
+    let best: Vec2 | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    let fallback: Vec2 | null = null;
+    let fallbackDistance = Number.POSITIVE_INFINITY;
+    for (const area of EGG_HIDE_AREAS) {
+      for (let i = 0; i < 4; i += 1) {
+        const point = {
+          x: Phaser.Math.Clamp(
+            area.x + area.width * Phaser.Math.FloatBetween(0.28, 0.72),
+            30,
+            WORLD_WIDTH - 30,
+          ),
+          y: Phaser.Math.Clamp(
+            area.y + area.height * Phaser.Math.FloatBetween(0.28, 0.72),
+            30,
+            WORLD_HEIGHT - 30,
+          ),
+        };
+        if (isBlocked(point, 18) || isOnPath(point)) continue;
+        const d = distance(point, this.state.chicken);
+        if (d < fallbackDistance) {
+          fallback = point;
+          fallbackDistance = d;
+        }
+        if (d < 165 || d > 380) continue;
+        const score = d + Phaser.Math.FloatBetween(0, 24);
+        if (score < bestScore) {
+          best = point;
+          bestScore = score;
+        }
       }
     }
-    return bestDistance > 0 ? best : this.farthestWeaselSpawnPoint();
+    return best ?? fallback ?? this.farthestWeaselSpawnPoint();
   }
 
   private randomEdgePoint(): Vec2 {
@@ -1570,14 +1591,6 @@ export class GameScene extends Phaser.Scene {
     return points.reduce((best, point) =>
       distance(point, this.state.chicken) > distance(best, this.state.chicken) ? point : best,
     );
-  }
-
-  private isBadWeaselSpawn(point: Vec2) {
-    const toPoint = { x: point.x - this.state.chicken.x, y: point.y - this.state.chicken.y };
-    const d = Math.hypot(toPoint.x, toPoint.y);
-    const facing = this.chicken.scaleX >= 0 ? 1 : -1;
-    const inFront = toPoint.x * facing > 0 && Math.abs(toPoint.y) < 230 && d < 540;
-    return d < 430 || inFront;
   }
 
   private nearestFood(radius: number) {

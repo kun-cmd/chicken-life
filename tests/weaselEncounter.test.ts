@@ -23,7 +23,7 @@ test('closed coop is absolutely safe', () => {
 test('light slows the weasel instead of clearing the encounter', () => {
   const state = {
     ...createWeaselEncounter({ x: 100, y: 100 }),
-    phase: 'panic' as const,
+    phase: 'chasing' as const,
     phaseSeconds: 1,
   };
   const dark = updateWeaselEncounter(state, {
@@ -46,17 +46,17 @@ test('light slows the weasel instead of clearing the encounter', () => {
   assert.ok(lit.state.position.x < dark.state.position.x);
 });
 
-test('contact marks a hit and leaves the weasel in panic instead of ending the night', () => {
+test('contact marks a hit from any active pursuit phase instead of ending the night', () => {
   const state = {
     ...createWeaselEncounter({ x: 100, y: 100 }),
-    phase: 'pouncing' as const,
+    phase: 'chasing' as const,
     warningSeconds: 0,
     phaseSeconds: 0.4,
-    target: { x: 120, y: 100 },
+    target: null,
   };
   const result = updateWeaselEncounter(state, {
     dt: 0.1,
-    chicken: { x: 105, y: 100 },
+    chicken: { x: 126, y: 100 },
     chickenInCoop: false,
     coopDoorClosed: false,
     illuminated: false,
@@ -66,7 +66,7 @@ test('contact marks a hit and leaves the weasel in panic instead of ending the n
   assert.equal(result.state.phase, 'panic');
 });
 
-test('a missed pounce becomes one second of visible panic before retreating', () => {
+test('a missed pounce becomes a short recovery before chasing again', () => {
   let state = {
     ...createWeaselEncounter({ x: 100, y: 100 }),
     phase: 'pouncing' as const,
@@ -81,22 +81,20 @@ test('a missed pounce becomes one second of visible panic before retreating', ()
     coopDoorClosed: false,
     illuminated: false,
     humanBlocking: false,
-    retreatTarget: { x: 20, y: 100 },
   });
   assert.equal(result.outcome, 'active');
   assert.equal(result.state.phase, 'panic');
 
   state = result.state;
   result = updateWeaselEncounter(state, {
-    dt: 1.1,
+    dt: 0.7,
     chicken: { x: 430, y: 100 },
     chickenInCoop: false,
     coopDoorClosed: false,
     illuminated: false,
     humanBlocking: false,
-    retreatTarget: { x: 20, y: 100 },
   });
-  assert.equal(result.state.phase, 'retreating');
+  assert.equal(result.state.phase, 'chasing');
 });
 
 test('detects a human standing between chicken and weasel', () => {
@@ -113,7 +111,7 @@ test('detects a human standing between chicken and weasel', () => {
 test('teaching encounter can run at reduced pursuit speed', () => {
   const state = {
     ...createWeaselEncounter({ x: 0, y: 0 }),
-    phase: 'panic' as const,
+    phase: 'chasing' as const,
     warningSeconds: 0,
     phaseSeconds: 1,
   };

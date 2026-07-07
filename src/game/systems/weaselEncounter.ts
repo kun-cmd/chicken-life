@@ -1,6 +1,13 @@
 import type { Vec2 } from '../simulation/state';
 
-export type WeaselPhase = 'lurking' | 'pouncing' | 'panic' | 'retreating' | 'repelled';
+export type WeaselPhase =
+  | 'lurking'
+  | 'chasing'
+  | 'windup'
+  | 'pouncing'
+  | 'panic'
+  | 'retreating'
+  | 'repelled';
 export type WeaselOutcome = 'active' | 'repelled' | 'caught' | 'safe';
 
 export interface WeaselEncounterState {
@@ -20,7 +27,6 @@ export interface WeaselContext {
   illuminated: boolean;
   humanBlocking: boolean;
   contactEnabled?: boolean;
-  retreatTarget?: Vec2;
   speedScale?: number;
 }
 
@@ -60,24 +66,81 @@ export function updateWeaselEncounter(
   const distance = Math.hypot(dx, dy);
   const speedScale = (context.speedScale ?? 1) * (context.illuminated ? 0.58 : 1);
   const canContact = (context.contactEnabled ?? true) && !context.humanBlocking;
+  const contactRadius = state.phase === 'pouncing' ? 36 : 30;
+
+  if (canContact && distance <= contactRadius) {
+    return {
+      state: { ...state, phase: 'panic', lightExposure, phaseSeconds: 0.5, target: null },
+      outcome: 'caught',
+    };
+  }
 
   if (state.phase === 'lurking') {
     return {
       state: {
         ...state,
-        phase: 'pouncing',
+        phase: 'chasing',
         lightExposure,
-        phaseSeconds: 0.62 + lightExposure * 0.18,
-        target: { ...context.chicken },
+        phaseSeconds: 0,
+        target: null,
       },
       outcome: 'active',
     };
   }
 
-  if ((state.phase === 'pouncing' || state.phase === 'panic') && distance <= 32 && canContact) {
+  if (state.phase === 'chasing') {
+    const step = 138 * speedScale * dt;
+    const position = moveToward(state.position, context.chicken, step);
+    const nextDistance = Math.hypot(context.chicken.x - position.x, context.chicken.y - position.y);
+    if (canContact && nextDistance <= contactRadius) {
+      return {
+        state: { position, phase: 'panic', lightExposure, warningSeconds: 0, phaseSeconds: 0.5, target: null },
+        outcome: 'caught',
+      };
+    }
+    if (nextDistance <= 118) {
+      return {
+        state: {
+          position,
+          phase: 'windup',
+          lightExposure,
+          warningSeconds: 0,
+          phaseSeconds: 0.22 + lightExposure * 0.08,
+          target: { ...context.chicken },
+        },
+        outcome: 'active',
+      };
+    }
     return {
-      state: { ...state, phase: 'panic', lightExposure, phaseSeconds: 1, target: null },
-      outcome: 'caught',
+      state: { ...state, position, lightExposure, warningSeconds: 0, phaseSeconds: 0, target: null },
+      outcome: 'active',
+    };
+  }
+
+  if (state.phase === 'windup') {
+    const phaseSeconds = state.phaseSeconds - dt;
+    if (phaseSeconds <= 0) {
+      return {
+        state: {
+          ...state,
+          phase: 'pouncing',
+          lightExposure,
+          warningSeconds: 0,
+          phaseSeconds: 0.26,
+          target: { ...context.chicken },
+        },
+        outcome: 'active',
+      };
+    }
+    return {
+      state: {
+        ...state,
+        lightExposure,
+        warningSeconds: 0,
+        phaseSeconds,
+        target: { ...context.chicken },
+      },
+      outcome: 'active',
     };
   }
 
@@ -86,15 +149,22 @@ export function updateWeaselEncounter(
     const tx = target.x - state.position.x;
     const ty = target.y - state.position.y;
     const targetDistance = Math.hypot(tx, ty);
-    const step = 430 * speedScale * dt;
+    const step = 520 * speedScale * dt;
     const reachedTarget = targetDistance <= Math.max(12, step);
     const position = reachedTarget
       ? { ...target }
       : moveToward(state.position, target, step);
+    const passedChicken = distanceToSegment(context.chicken, state.position, position) <= contactRadius;
+    if (canContact && passedChicken) {
+      return {
+        state: { position, phase: 'panic', lightExposure, warningSeconds: 0, phaseSeconds: 0.5, target: null },
+        outcome: 'caught',
+      };
+    }
     const phaseSeconds = state.phaseSeconds - dt;
     if (phaseSeconds <= 0 || reachedTarget) {
       return {
-        state: { position, phase: 'panic', lightExposure, warningSeconds: 0, phaseSeconds: 1, target: null },
+        state: { position, phase: 'panic', lightExposure, warningSeconds: 0, phaseSeconds: 0.58, target: null },
         outcome: 'active',
       };
     }
@@ -106,43 +176,13 @@ export function updateWeaselEncounter(
 
   if (state.phase === 'panic') {
     const phaseSeconds = state.phaseSeconds - dt;
-    const position = moveToward(state.position, context.chicken, 148 * speedScale * dt);
     if (phaseSeconds <= 0) {
       return {
         state: {
-          position,
-          phase: 'retreating',
+          ...state,
+          phase: 'chasing',
           lightExposure,
           warningSeconds: 0,
-          phaseSeconds: 0,
-          target: context.retreatTarget ? { ...context.retreatTarget } : null,
-        },
-        outcome: 'active',
-      };
-    }
-    return {
-      state: { ...state, position, lightExposure, warningSeconds: 0, phaseSeconds, target: null },
-      outcome: 'active',
-    };
-  }
-
-  if (state.phase === 'retreating') {
-    const target = state.target ?? context.retreatTarget;
-    if (!target) {
-      return {
-        state: { ...state, phase: 'lurking', lightExposure, warningSeconds: 2.1, phaseSeconds: 0, target: null },
-        outcome: 'active',
-      };
-    }
-    const retreatDistance = Math.hypot(target.x - state.position.x, target.y - state.position.y);
-    const step = 238 * speedScale * dt;
-    if (retreatDistance <= Math.max(24, step)) {
-      return {
-        state: {
-          position: { ...target },
-          phase: 'lurking',
-          lightExposure,
-          warningSeconds: 2.1 + lightExposure * 0.8,
           phaseSeconds: 0,
           target: null,
         },
@@ -150,7 +190,14 @@ export function updateWeaselEncounter(
       };
     }
     return {
-      state: { ...state, position: moveToward(state.position, target, step), lightExposure, target: { ...target } },
+      state: { ...state, lightExposure, warningSeconds: 0, phaseSeconds, target: null },
+      outcome: 'active',
+    };
+  }
+
+  if (state.phase === 'retreating') {
+    return {
+      state: { ...state, phase: 'chasing', lightExposure, warningSeconds: 0, phaseSeconds: 0, target: null },
       outcome: 'active',
     };
   }
