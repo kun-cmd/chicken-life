@@ -2714,7 +2714,7 @@ function eggReasonFor(state: GameState, type: EggType, metrics: ReturnType<typeo
     }
     if (metrics.eatenTotal < 3) return `今天总进食数只有 ${metrics.eatenTotal}，少于 3。`;
     if (metrics.nutrition < 35) return `有效营养只有 ${Math.round(metrics.nutrition)}，少于 35。`;
-    return '没有满足更好蛋的条件，所以落到裂纹蛋。';
+    return '没有满足更好蛋的条件，所以只是差蛋。';
   }
   if (type === 'greenLeaf') {
     return state.unlockedFoods.grass

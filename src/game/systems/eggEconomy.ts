@@ -43,8 +43,8 @@ export function evaluateEggQuality(input: EggQualityInput) {
 }
 
 export function eggQualityLabel(quality: EggQuality) {
-  if (quality === 'excellent') return '极好蛋';
-  if (quality === 'good') return '好蛋';
+  if (quality === 'excellent') return '好蛋';
+  if (quality === 'good') return '较好蛋';
   if (quality === 'ordinary') return '普通蛋';
   return '差蛋';
 }
