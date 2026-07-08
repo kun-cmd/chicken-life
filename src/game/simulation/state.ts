@@ -405,6 +405,7 @@ const NIGHT_START = 0.82;
 const KEEPER_FEED_END = 0.25;
 const NUTRITION_LIMIT = 100;
 const FOOD_NUTRITION_GAIN_SCALE = 0.85;
+const PREMIUM_FEED_NUTRITION_GAIN = 5;
 const HOLE_HEAT_COOLING_SCALE = 1.4;
 const DIG_SPRINT_COST = 28;
 const WATER_BOOST_LIMIT = 100;
@@ -750,7 +751,7 @@ export function nutritionPressureFor(state: GameState, bonus = 0) {
 
 export function eatFood(state: GameState, food: FoodEntity) {
   state.eaten[food.type] = (state.eaten[food.type] ?? 0) + 1;
-  const nutritionGain = nutritionFor(food.type);
+  const nutritionGain = nutritionFor(food);
   state.nutrition = clamp(state.nutrition + nutritionGain, 0, NUTRITION_LIMIT);
   let discovery: ReturnType<typeof consumeFood> | null = null;
   if (isForagingFood(food.type)) {
@@ -768,7 +769,7 @@ export function eatFood(state: GameState, food: FoodEntity) {
     };
     state.message = `${state.profile.name}第一次尝到了${foodDisplayName(food.type)}。`;
   } else {
-    state.message = foodMessage(food.type);
+    state.message = foodMessage(food);
   }
 }
 
@@ -978,8 +979,8 @@ export function servePremiumFeed(state: GameState) {
     return [];
   }
   state.premiumFeedServedToday = true;
-  const foods = Array.from({ length: CORE_LOOP_TUNING.premiumFeedPieces }, (_, index) =>
-    spawnFood(
+  const foods = Array.from({ length: CORE_LOOP_TUNING.premiumFeedPieces }, (_, index) => {
+    const food = spawnFood(
       state,
       'grain',
       {
@@ -987,8 +988,10 @@ export function servePremiumFeed(state: GameState) {
         y: PREMIUM_FEED_POSITION.y + 34 + (index % 2) * 10,
       },
       state.time,
-    ),
-  );
+    );
+    food.fromKeeper = true;
+    return food;
+  });
   state.message = '你从饲料桶舀出一勺，今天院子里多了一份稳稳的谷物。';
   return foods;
 }
@@ -1904,7 +1907,7 @@ function archiveEggDisplayName(entry: EggArchiveEntry) {
 }
 
 function isQualityEggName(name: string) {
-  return name === '差蛋' || name === '普通蛋' || name === '较好蛋' || name === '好蛋';
+  return name === '差蛋' || name === '普通蛋' || name === '较好蛋' || name === '好蛋' || name === '金蛋';
 }
 
 function endingMemoriesFor(state: GameState) {
@@ -2848,7 +2851,7 @@ function nearMissEggHint(state: GameState, currentType: EggType, metrics: Return
     if (!best || score < best.score) best = { missing, score };
   }
 
-  if (!best) return '今天已经很接近当前能追到的好蛋了，继续稳定觅食就行。';
+  if (!best) return '今天已经很接近当前能追到的金蛋了，继续稳定觅食就行。';
   return `再补一点就能让蛋更有记忆：${best.missing.slice(0, 2).join('，')}。`;
 }
 
@@ -3120,7 +3123,9 @@ function freshLightPressureUsed() {
   return SAFE_LIGHTS.map(() => 0);
 }
 
-function foodMessage(type: FoodType) {
+function foodMessage(food: FoodEntity) {
+  const type = food.type;
+  if (type === 'grain' && food.fromKeeper) return '优质谷物带着香味，鸡啄完肚子明显更踏实。';
   if (type === 'grain') return '嗒，米粒被啄进嘴里，肚子稳稳垫了一点。';
   if (type === 'grass') return '嫩草带着露水，鸡舒服地抖了抖羽毛。';
   if (type === 'bug' || type === 'worm') return '蚯蚓弹了一下，还是被鸡叼住了，肚子暖起来。';
@@ -3141,7 +3146,9 @@ function foodUnlockHint(type: FoodType) {
   return '这口还没学会怎么吃。';
 }
 
-function nutritionFor(type: FoodType) {
+function nutritionFor(food: FoodEntity) {
+  const type = food.type;
+  if (type === 'grain' && food.fromKeeper) return scaledNutritionGain(PREMIUM_FEED_NUTRITION_GAIN);
   if (type === 'grain') return scaledNutritionGain(3);
   if (type === 'grass') return scaledNutritionGain(2);
   if (type === 'bug' || type === 'worm') return scaledNutritionGain(5);

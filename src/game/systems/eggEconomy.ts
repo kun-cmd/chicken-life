@@ -18,7 +18,7 @@ export const EGG_BUDGET: Record<EggQuality, number> = {
 export const EGG_QUALITY_THRESHOLDS = {
   ordinary: 40,
   good: 60,
-  excellent: 74,
+  excellent: 80,
 } as const;
 
 const WILD_FOODS = new Set<ForagingFoodType>([
@@ -58,7 +58,7 @@ function downgradeEggQuality(quality: EggQuality): EggQuality {
 }
 
 export function eggQualityLabel(quality: EggQuality) {
-  if (quality === 'excellent') return '好蛋';
+  if (quality === 'excellent') return '金蛋';
   if (quality === 'good') return '较好蛋';
   if (quality === 'ordinary') return '普通蛋';
   return '差蛋';

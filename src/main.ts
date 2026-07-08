@@ -251,16 +251,16 @@ function eggPressureText(snapshot: HudSnapshot) {
       : score < EGG_QUALITY_THRESHOLDS.good
         ? `${EGG_QUALITY_THRESHOLDS.good}=较好蛋`
         : score < EGG_QUALITY_THRESHOLDS.excellent
-          ? `${EGG_QUALITY_THRESHOLDS.excellent}=好蛋`
-          : '已到好蛋';
+          ? `${EGG_QUALITY_THRESHOLDS.excellent}=金蛋`
+          : '已到金蛋';
   const facts = [
     score < EGG_QUALITY_THRESHOLDS.ordinary
       ? `差${EGG_QUALITY_THRESHOLDS.ordinary - score}到普通蛋`
       : score < EGG_QUALITY_THRESHOLDS.good
         ? `差${EGG_QUALITY_THRESHOLDS.good - score}到较好蛋`
         : score < EGG_QUALITY_THRESHOLDS.excellent
-          ? `差${EGG_QUALITY_THRESHOLDS.excellent - score}到好蛋`
-          : '蛋势够好蛋',
+          ? `差${EGG_QUALITY_THRESHOLDS.excellent - score}到金蛋`
+          : '蛋势够金蛋',
     snapshot.eggWildKinds > 0 ? '野味已并入蛋势' : '野味可补蛋势',
     snapshot.eggDryRest ? '干燥不降段' : '潮湿降一段',
   ];

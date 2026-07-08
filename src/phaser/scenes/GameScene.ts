@@ -1949,6 +1949,12 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(0x17120d, 1).fillCircle(40, 15, 1.5);
     });
     this.generateTexture('food-grain', 32, 32, (g) => g.fillStyle(0xffd86a, 1).fillEllipse(16, 16, 10, 6));
+    this.generateTexture('food-premium-grain', 42, 36, (g) => {
+      g.fillStyle(0xfff0a8, 0.18).fillCircle(21, 18, 15);
+      g.fillStyle(0xf0b84e, 1).fillEllipse(16, 18, 12, 7);
+      g.fillStyle(0xffdc73, 1).fillEllipse(25, 16, 11, 7);
+      g.fillStyle(0xfff2a5, 1).fillEllipse(23, 23, 9, 5);
+    });
     this.generateTexture('food-grass', 44, 40, (g) => {
       g.fillStyle(0x87c358, 1).fillTriangle(14, 28, 22, 10, 30, 28);
       g.fillStyle(0x5fa242, 1).fillTriangle(25, 31, 32, 12, 39, 31);
@@ -2298,7 +2304,9 @@ export class GameScene extends Phaser.Scene {
 
   private createFoodView(food: FoodEntity): FoodView {
     const key =
-      food.type === 'nightBug' && food.buried
+      food.type === 'grain' && food.fromKeeper
+        ? 'food-premium-grain'
+        : food.type === 'nightBug' && food.buried
         ? 'food-nightBug-buried'
         : food.type === 'meat'
         ? `food-meat-${Math.min(food.progress ?? 0, food.hardness ?? 3)}`
@@ -2458,9 +2466,10 @@ export class GameScene extends Phaser.Scene {
   private createEggView(visible: boolean) {
     this.eggView?.destroy();
     if (!this.state.egg) return;
-    const glow = this.add.circle(0, 0, 26, 0xfff1b8, 0.22);
-    const egg = this.add.ellipse(0, 0, 22, 30, 0xfff2c7);
-    const mark = this.add.ellipse(4, -6, 6, 9, 0xe8c982, 0.72);
+    const golden = this.state.egg.quality === 'excellent';
+    const glow = this.add.circle(0, 0, golden ? 30 : 26, golden ? 0xffd75a : 0xfff1b8, golden ? 0.36 : 0.22);
+    const egg = this.add.ellipse(0, 0, 22, 30, golden ? 0xffc928 : 0xfff2c7);
+    const mark = this.add.ellipse(4, -6, 6, 9, golden ? 0xffef92 : 0xe8c982, 0.72);
     this.eggView = this.add.container(this.state.egg.x, this.state.egg.y, [glow, egg, mark]).setDepth(45);
     this.eggView.setVisible(visible);
   }

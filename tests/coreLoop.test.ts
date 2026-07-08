@@ -17,6 +17,7 @@ import {
   digHole,
   eatFood,
   restInHole,
+  servePremiumFeed,
   updateNightPressure,
 } from '../src/game/simulation/state';
 import { YARD_LAMP_POSITION } from '../src/game/content/yardUpgrades';
@@ -82,7 +83,7 @@ test('egg quality follows potential tiers, wild food bonus, and wet downgrade', 
     dryRest: true,
   });
   const excellent = evaluateEggQuality({
-    nutrition: 74,
+    nutrition: 80,
     foodsEaten: [],
     dryRest: true,
   });
@@ -92,7 +93,7 @@ test('egg quality follows potential tiers, wild food bonus, and wet downgrade', 
     dryRest: true,
   });
   const wetDowngraded = evaluateEggQuality({
-    nutrition: 74,
+    nutrition: 80,
     foodsEaten: [],
     dryRest: false,
   });
@@ -105,8 +106,24 @@ test('egg quality follows potential tiers, wild food bonus, and wet downgrade', 
   assert.equal(excellent.budget, 5);
   assert.equal(wildBoosted.score, 60);
   assert.equal(wildBoosted.quality, 'good');
-  assert.equal(wetDowngraded.score, 74);
+  assert.equal(wetDowngraded.score, 80);
   assert.equal(wetDowngraded.quality, 'good');
+});
+
+test('premium feed pieces visibly count as richer grain nutrition', () => {
+  const state = createGameState();
+  state.mode = 'human';
+  state.yard.owned.push('premium-feed');
+  state.nutrition = 60;
+  const served = servePremiumFeed(state);
+  assert.equal(served.length, CORE_LOOP_TUNING.premiumFeedPieces);
+  assert.ok(served.every((food) => food.type === 'grain' && food.fromKeeper));
+
+  for (const food of served) {
+    eatFood(state, food);
+  }
+
+  assert.equal(state.nutrition, 72);
 });
 
 test('night pressure covers egg nutrition and does not rise just because time passes', () => {
