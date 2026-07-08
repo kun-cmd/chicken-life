@@ -105,7 +105,7 @@ test('keeper daytime route stays on paved paths', () => {
   }
 });
 
-test('keeper returns home after one daytime S route', () => {
+test('keeper waits at the end of one S route until five seeds are fed', () => {
   const state = createGameState();
   const lastPoint = KEEPER_ROUTE[KEEPER_ROUTE.length - 1];
   state.mode = 'chicken';
@@ -123,6 +123,11 @@ test('keeper returns home after one daytime S route', () => {
     y: lastPoint.y,
   };
 
+  assert.equal(updateKeeper(state, 0, 0.1), null);
+  assert.equal(state.keeper.returning, false);
+  assert.equal(state.keeper.routeIndex, KEEPER_ROUTE.length - 1);
+
+  state.eaten.sunflower = 5;
   assert.equal(updateKeeper(state, 0, 0.1), null);
   assert.equal(state.keeper.returning, true);
   assert.equal(state.keeper.routeIndex, KEEPER_ROUTE.length - 1);

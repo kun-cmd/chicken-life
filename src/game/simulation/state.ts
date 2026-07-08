@@ -421,6 +421,8 @@ const KEEPER_SWIFT_RESCUE_AFFECTION = 85;
 const KEEPER_VISIT_DELAY_MIN = 18;
 const KEEPER_VISIT_DELAY_RANDOM = 36;
 const KEEPER_SUNFLOWER_LIMIT = 5;
+const KEEPER_SUNFLOWER_INTERVAL_MIN = 4;
+const KEEPER_SUNFLOWER_INTERVAL_RANDOM = 1.2;
 export const CORE_LOOP_TUNING = {
   predatorContactPressure: 34,
   porchLightReliefMin: 5,
@@ -1031,7 +1033,7 @@ export function updateKeeper(state: GameState, moveDt: number, clockDt = moveDt)
     state.keeper.active = true;
     state.keeper.returning = false;
     state.keeper.routeIndex = 1;
-    state.keeper.scatterCooldown = 2.2 + Math.random() * 2.2;
+    state.keeper.scatterCooldown = 1.8 + Math.random() * 1.4;
     if (!state.message) state.message = '养鸡人拎着小桶走进院子，准备撒几粒瓜子。';
     return null;
   }
@@ -1052,10 +1054,13 @@ export function updateKeeper(state: GameState, moveDt: number, clockDt = moveDt)
       state.message = '养鸡人收起小桶回房子了，院子安静下来。';
       return null;
     }
-    if (state.keeper.routeIndex >= KEEPER_ROUTE.length - 1) {
+    if (
+      state.keeper.routeIndex >= KEEPER_ROUTE.length - 1 &&
+      keeperSunflowerCount(state) >= KEEPER_SUNFLOWER_LIMIT
+    ) {
       state.keeper.returning = true;
     } else {
-      state.keeper.routeIndex += 1;
+      state.keeper.routeIndex = Math.min(state.keeper.routeIndex + 1, KEEPER_ROUTE.length - 1);
     }
   } else {
     const step = Math.min(length, keeperSpeed * moveDt);
@@ -1066,7 +1071,8 @@ export function updateKeeper(state: GameState, moveDt: number, clockDt = moveDt)
 
   state.keeper.scatterCooldown -= clockDt;
   if (!state.keeper.returning && state.phase === 'day' && state.time > 0.08 && state.keeper.scatterCooldown <= 0) {
-    state.keeper.scatterCooldown = 9 + Math.random() * 4;
+    state.keeper.scatterCooldown =
+      KEEPER_SUNFLOWER_INTERVAL_MIN + Math.random() * KEEPER_SUNFLOWER_INTERVAL_RANDOM;
     return scatterSunflowerSeed(state);
   }
 
