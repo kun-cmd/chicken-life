@@ -59,6 +59,43 @@ export function foodPoolFor(
   return pool;
 }
 
+export interface FamiliarityFoodPoolContext {
+  profile: ChickenProfile;
+  dusk: boolean;
+  day: number;
+  familiarity: number;
+}
+
+const FAMILIARITY_FOOD_THRESHOLDS: {
+  food: ForagingFoodType;
+  ability: keyof ChickenProfile['awakenedAbilities'];
+  threshold: number;
+}[] = [
+  { food: 'cricket', ability: 'sprint', threshold: 25 },
+  { food: 'worm', ability: 'scratch', threshold: 35 },
+  { food: 'beetle', ability: 'sprint', threshold: 55 },
+  { food: 'berry', ability: 'flutter', threshold: 70 },
+];
+
+export function foodPoolForFamiliarity(
+  context: FamiliarityFoodPoolContext,
+): ForagingFoodType[] {
+  const pool = foodPoolFor(context.profile, context.dusk, context.day);
+  if (context.dusk) return pool;
+
+  for (const entry of FAMILIARITY_FOOD_THRESHOLDS) {
+    if (
+      context.profile.awakenedAbilities[entry.ability] &&
+      context.familiarity >= entry.threshold &&
+      !pool.includes(entry.food)
+    ) {
+      pool.push(entry.food);
+    }
+  }
+
+  return pool;
+}
+
 export function consumeFood(state: ForagingState, type: ForagingFoodType) {
   const firstDiscovery = !state.discoveredFoods.includes(type);
   if (firstDiscovery) state.discoveredFoods.push(type);

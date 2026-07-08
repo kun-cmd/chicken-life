@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createChickenProfile } from '../src/game/profile/chickenProfile';
 import { createGameState } from '../src/game/simulation/state';
-import { createForagingState, foodPoolFor } from '../src/game/systems/foraging';
+import {
+  createForagingState,
+  foodPoolFor,
+  foodPoolForFamiliarity,
+} from '../src/game/systems/foraging';
 
 test('natural food progression keeps sunflower seeds out of the yard pool', () => {
   const profile = createChickenProfile(1234);
@@ -39,4 +43,51 @@ test('a new game starts without naturally spawned sunflower seeds', () => {
 
   assert.equal(createForagingState().discoveredFoods.includes('sunflower'), false);
   assert.equal(state.foods.some((food) => food.type === 'sunflower' && !food.fromKeeper), false);
+});
+
+test('familiarity food pool keeps low familiarity on the base pool', () => {
+  const profile = createChickenProfile(1234);
+  profile.awakenedAbilities.scratch = true;
+  profile.awakenedAbilities.flutter = true;
+
+  assert.deepEqual(
+    foodPoolForFamiliarity({ profile, dusk: false, day: 1, familiarity: 10 }),
+    ['grain', 'grass'],
+  );
+});
+
+test('familiarity food pool can reveal wild foods before day gates when abilities allow it', () => {
+  const profile = createChickenProfile(1234);
+  profile.awakenedAbilities.scratch = true;
+  profile.awakenedAbilities.flutter = true;
+
+  const pool = foodPoolForFamiliarity({ profile, dusk: false, day: 1, familiarity: 80 });
+
+  assert.equal(pool.includes('cricket'), true);
+  assert.equal(pool.includes('worm'), true);
+  assert.equal(pool.includes('beetle'), true);
+  assert.equal(pool.includes('berry'), true);
+});
+
+test('familiarity food pool still respects ability gates', () => {
+  const profile = createChickenProfile(1234);
+  profile.awakenedAbilities.sprint = false;
+  profile.awakenedAbilities.scratch = false;
+  profile.awakenedAbilities.flutter = false;
+
+  const pool = foodPoolForFamiliarity({ profile, dusk: false, day: 1, familiarity: 100 });
+
+  assert.deepEqual(pool, ['grain', 'grass']);
+});
+
+test('familiarity food pool does not add daylight extras at dusk', () => {
+  const profile = createChickenProfile(1234);
+  profile.awakenedAbilities.scratch = true;
+  profile.awakenedAbilities.flutter = true;
+
+  const pool = foodPoolForFamiliarity({ profile, dusk: true, day: 4, familiarity: 100 });
+
+  assert.equal(pool.includes('nightBug'), true);
+  assert.equal(pool.includes('beetle'), false);
+  assert.equal(pool.includes('berry'), false);
 });

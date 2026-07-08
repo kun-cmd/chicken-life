@@ -36,8 +36,9 @@ import {
   createDailyFoodPlan,
   createForagingState,
   foodDisplayName,
-  foodPoolFor,
+  foodPoolForFamiliarity,
   isForagingFood,
+  type DailyFoodSpawn,
   type ForagingFoodType,
   type ForagingState,
 } from '../systems/foraging';
@@ -87,6 +88,7 @@ import {
 } from '../systems/yardUpgrades';
 import {
   createYardFamiliarityState,
+  regionFamiliarityFor,
   restoreYardFamiliarityState,
   type YardFamiliarityState,
 } from '../systems/yardFamiliarity';
@@ -2415,10 +2417,10 @@ export function refillForagingFoods(state: GameState, offscreenMudPoints: readon
   if (remaining > 2) return [];
 
   const wave = state.foraging.refillWave;
-  const plan = createDailyFoodPlan(
+  const plan = createFamiliarFoodPlan(
+    state,
     state.profile.runSeed ^ Math.imul(wave + 1, 0x45d9f3b),
-    state.day,
-    foodPoolFor(state.profile, state.flow.phase === 'chicken-dusk', state.day),
+    state.flow.phase === 'chicken-dusk',
     offscreenMudPoints,
     4,
   );
@@ -2430,11 +2432,45 @@ export function refillForagingFoods(state: GameState, offscreenMudPoints: readon
   });
 }
 
+function createFamiliarFoodPlan(
+  state: GameState,
+  runSeed: number,
+  dusk: boolean,
+  points: readonly Vec2[],
+  count: number,
+): DailyFoodSpawn[] {
+  const random = createSeededRandom(runSeed ^ Math.imul(state.day, 0x9e3779b1));
+  if (points.length === 0 || count <= 0) return [];
+
+  const shuffledPoints = [...points];
+  for (let index = shuffledPoints.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [shuffledPoints[index], shuffledPoints[swapIndex]] = [
+      shuffledPoints[swapIndex],
+      shuffledPoints[index],
+    ];
+  }
+
+  return Array.from({ length: Math.min(count, shuffledPoints.length) }, (_, index) => {
+    const point = shuffledPoints[index];
+    const pool = foodPoolForFamiliarity({
+      profile: state.profile,
+      dusk,
+      day: state.day,
+      familiarity: regionFamiliarityFor(state.yardFamiliarity, point),
+    });
+    return {
+      ...point,
+      type: pool[Math.floor(random() * pool.length)],
+    };
+  });
+}
+
 function spawnDailyFood(state: GameState) {
-  const plan = createDailyFoodPlan(
+  const plan = createFamiliarFoodPlan(
+    state,
     state.profile.runSeed,
-    state.day,
-    foodPoolFor(state.profile, false, state.day),
+    false,
     FOOD_SPAWN_POINTS,
     15,
   );
