@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { KEEPER_ROUTE, isOnPath } from '../src/game/content/yard';
+import { KEEPER_ROUTE, MAIN_PATH, isOnPath } from '../src/game/content/yard';
 import {
   createGameState,
+  expireFoods,
   isGoodFoodSpot,
   updateKeeper,
 } from '../src/game/simulation/state';
@@ -84,6 +85,8 @@ test('keeper daytime sunflower feeding allows five seeds then returns', () => {
 test('keeper daytime route stays on paved paths', () => {
   for (const point of KEEPER_ROUTE) {
     assert.equal(isOnPath(point), true);
+    assert.ok(point.x >= MAIN_PATH.x);
+    assert.ok(point.x <= MAIN_PATH.x + MAIN_PATH.width);
   }
 
   for (let index = 1; index < KEEPER_ROUTE.length; index += 1) {
@@ -100,6 +103,32 @@ test('keeper daytime route stays on paved paths', () => {
       );
     }
   }
+});
+
+test('expired keeper sunflower seeds are removed from the yard', () => {
+  const state = createGameState();
+  state.mode = 'chicken';
+  state.phase = 'day';
+  state.time = 0.3;
+  state.keeper = {
+    ...state.keeper,
+    active: true,
+    returning: false,
+    doneFeeding: false,
+    rescuing: false,
+    routeIndex: 1,
+    scatterCooldown: 0,
+    x: KEEPER_ROUTE[1].x,
+    y: KEEPER_ROUTE[1].y,
+  };
+
+  const seed = updateKeeper(state, 0, 0.1);
+  assert.ok(seed);
+  state.time = seed.freshUntil! + 0.01;
+
+  const expired = expireFoods(state);
+  assert.deepEqual(expired.expiredIds, [seed.id]);
+  assert.equal(state.foods.some((food) => food.id === seed.id), false);
 });
 
 test('non-keeper food starts on mud spots', () => {

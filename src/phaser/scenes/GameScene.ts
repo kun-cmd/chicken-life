@@ -656,7 +656,6 @@ export class GameScene extends Phaser.Scene {
       storyPhase === 'chicken-night'
     ) {
       this.updateChicken(dt, actions);
-      this.updateKeeperFeeding(dt);
     }
 
     this.updateAmbientNightCues(dt);
@@ -711,6 +710,7 @@ export class GameScene extends Phaser.Scene {
     let diggingSeconds = 0;
     let huntingSeconds = 0;
     let holeRestSeconds = 0;
+    this.expireAndSyncFoods();
     if (
       this.state.facilityLife.activity === 'hole-rest' &&
       (!actions.scratchHeld || actions.x !== 0 || actions.y !== 0)
@@ -742,6 +742,7 @@ export class GameScene extends Phaser.Scene {
         night: this.state.flow.phase === 'chicken-night',
       });
       this.advanceChickenWorld(activeSeconds);
+      this.updateKeeperFeeding(activeSeconds);
       this.updateChickenPressure(activeSeconds);
       this.updateRealtimeThreats(dt);
       return;
@@ -761,6 +762,7 @@ export class GameScene extends Phaser.Scene {
         night: this.state.flow.phase === 'chicken-night',
       });
       this.advanceChickenWorld(activeSeconds);
+      this.updateKeeperFeeding(activeSeconds);
       this.updateChickenPressure(activeSeconds);
       this.updateRealtimeThreats(dt);
       return;
@@ -922,6 +924,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       this.advanceChickenWorld(actionSeconds);
+      this.updateKeeperFeeding(actionSeconds);
       this.updateWeaselApproach(actionSeconds, canSprint, diggingSeconds + huntingSeconds);
       this.updateChickenPressure(actionSeconds);
     }
@@ -2479,11 +2482,25 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateKeeperFeeding(dt: number) {
+    if (dt <= 0) return;
     const seed = updateKeeper(this.state, dt, dt);
     if (!seed) return;
     this.foodViews.set(seed.id, this.createFoodView(seed));
     this.showScatterFx(seed);
     this.playSfx(SFX_PECK_KEY, 0.28);
+  }
+
+  private expireAndSyncFoods() {
+    const foodUpdate = expireFoods(this.state);
+    if (foodUpdate.expiredIds.length === 0 && foodUpdate.spawnedFoods.length === 0) return;
+    for (const expiredId of foodUpdate.expiredIds) {
+      this.foodViews.get(expiredId)?.destroy();
+      this.foodViews.delete(expiredId);
+    }
+    for (const spawnedFood of foodUpdate.spawnedFoods) {
+      this.foodViews.set(spawnedFood.id, this.createFoodView(spawnedFood));
+    }
+    this.syncFoodViews();
   }
 
   private revealEgg() {
