@@ -65,21 +65,48 @@ test('sprinting heats the chicken while shade and water cool it', () => {
   assert.equal(sprintScaleForHeat(BODY_COMFORT_TUNING.maxHeat), BODY_COMFORT_TUNING.minimumSprintScale);
 });
 
-test('egg quality always has a budget floor and rewards wild food plus dry rest', () => {
+test('egg quality follows potential tiers, wild food bonus, and wet downgrade', () => {
   const poor = evaluateEggQuality({
-    nutrition: 0,
+    nutrition: 39,
+    foodsEaten: [],
+    dryRest: true,
+  });
+  const ordinary = evaluateEggQuality({
+    nutrition: 40,
+    foodsEaten: [],
+    dryRest: true,
+  });
+  const good = evaluateEggQuality({
+    nutrition: 60,
     foodsEaten: [],
     dryRest: true,
   });
   const excellent = evaluateEggQuality({
-    nutrition: 80,
-    foodsEaten: ['worm', 'nightBug'],
+    nutrition: 74,
+    foodsEaten: [],
     dryRest: true,
   });
+  const wildBoosted = evaluateEggQuality({
+    nutrition: 52,
+    foodsEaten: ['worm'],
+    dryRest: true,
+  });
+  const wetDowngraded = evaluateEggQuality({
+    nutrition: 74,
+    foodsEaten: [],
+    dryRest: false,
+  });
+  assert.equal(poor.quality, 'poor');
   assert.equal(poor.budget, EGG_BUDGET.poor);
   assert.equal(poor.budget, 2);
+  assert.equal(ordinary.quality, 'ordinary');
+  assert.equal(good.quality, 'good');
   assert.equal(excellent.quality, 'excellent');
   assert.equal(excellent.budget, 5);
+  assert.equal(wildBoosted.score, 60);
+  assert.equal(wildBoosted.quality, 'good');
+  assert.equal(wetDowngraded.score, 74);
+  assert.equal(wetDowngraded.quality, 'good');
 });
 
 test('night pressure covers egg nutrition and does not rise just because time passes', () => {

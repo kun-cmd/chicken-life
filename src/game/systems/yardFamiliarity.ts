@@ -28,6 +28,7 @@ export interface YardFamiliarityState {
 }
 
 const MAX_FAMILIARITY = 100;
+const FAMILIARITY_GAIN_PER_ACTIVE_SECOND = 0.12;
 
 export function createYardFamiliarityState(): YardFamiliarityState {
   return {
@@ -107,7 +108,10 @@ export function recordRegionExploration(
     entry.firstSeenDay = currentDay;
   }
   const canShowTip = !entry.tipShown;
-  const gain = Math.min(activeSeconds * 6, MAX_FAMILIARITY - entry.familiarity);
+  const gain = Math.min(
+    activeSeconds * FAMILIARITY_GAIN_PER_ACTIVE_SECOND,
+    MAX_FAMILIARITY - entry.familiarity,
+  );
   entry.familiarity = Math.min(MAX_FAMILIARITY, entry.familiarity + gain);
   return { region, firstSeen, canShowTip };
 }

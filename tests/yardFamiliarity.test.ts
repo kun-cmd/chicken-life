@@ -10,6 +10,7 @@ import {
   markTipShownForRegion,
 } from '../src/game/systems/yardFamiliarity';
 import { restoreGameState } from '../src/game/simulation/state';
+import { DAY_ACTIVE_SECONDS } from '../src/game/systems/dayFlow';
 
 // Yard coordinates to test against:
 // COOP: { x: 1038, y: 245, width: 178, height: 132 }, center ~(1127, 311)
@@ -88,6 +89,14 @@ test('familiarity does not exceed max', () => {
     recordRegionExploration(state, { x: 164, y: 185 }, 3, 1);
   }
   assert.ok(state.regions['pond-bank'].familiarity <= 100);
+});
+
+test('familiarity needs several active days to max out', () => {
+  const state = createYardFamiliarityState();
+  for (let day = 1; day <= 4; day++) {
+    recordRegionExploration(state, { x: 164, y: 185 }, DAY_ACTIVE_SECONDS, day);
+  }
+  assert.ok(state.regions['pond-bank'].familiarity < 100);
 });
 
 test('movement scale is lower for unfamiliar regions', () => {

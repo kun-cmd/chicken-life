@@ -5,7 +5,7 @@ import type { HudSnapshot } from './game/simulation/state';
 import { YARD_UPGRADES } from './game/content/yardUpgrades';
 import { foodDisplayName, type ForagingFoodType } from './game/systems/foraging';
 import type { TouchOption } from './game/systems/closeInteraction';
-import { eggQualityLabel } from './game/systems/eggEconomy';
+import { EGG_QUALITY_THRESHOLDS, eggQualityLabel } from './game/systems/eggEconomy';
 
 interface CloseInteractionOpenDetail {
   chickenName: string;
@@ -185,7 +185,7 @@ function renderHud(snapshot: HudSnapshot) {
   hud.pressureWrap.dataset.quality = snapshot.projectedEggQuality;
   hud.pressureWrap.dataset.score = String(snapshot.eggQualityScore);
   hud.eggPressureCurrent.textContent = eggPressureText(snapshot);
-  hud.pressureWrap.title = `当前 ${eggQualityLabel(snapshot.projectedEggQuality)}：蛋势 ${snapshot.eggQualityScore}/4；有效营养 ${snapshot.effectiveNutrition} / 原始营养 ${snapshot.nutrition}，夜压 ${snapshot.pressure}`;
+  hud.pressureWrap.title = `当前 ${eggQualityLabel(snapshot.projectedEggQuality)}：蛋势 ${snapshot.eggQualityScore}；有效营养 ${snapshot.effectiveNutrition} / 原始营养 ${snapshot.nutrition}，夜压 ${snapshot.pressure}`;
   hud.contextPrompt.textContent = snapshot.contextPrompt;
   if (document.activeElement !== hud.debugAffection) {
     hud.debugAffection.value = String(snapshot.affection);
@@ -244,21 +244,27 @@ function renderDebugFamiliarity(snapshot: HudSnapshot) {
 
 function eggPressureText(snapshot: HudSnapshot) {
   const quality = eggQualityLabel(snapshot.projectedEggQuality);
-  const facts = [
-    snapshot.effectiveNutrition >= 35 ? '35✓' : `差${Math.max(0, 35 - snapshot.effectiveNutrition)}到35`,
-    snapshot.effectiveNutrition >= 70 ? '70✓' : `差${Math.max(0, 70 - snapshot.effectiveNutrition)}到70`,
-    snapshot.eggWildKinds > 0 ? '野味✓' : '缺野味',
-    snapshot.eggDryRest ? '干燥✓' : '待干燥休息',
-  ];
-  const next =
-    snapshot.eggQualityScore <= 1
-      ? '2点=普通蛋'
-      : snapshot.eggQualityScore === 2
-        ? '3点=较好蛋'
-        : snapshot.eggQualityScore === 3
-          ? '4点=好蛋'
+  const score = snapshot.eggQualityScore;
+  const nextThreshold =
+    score < EGG_QUALITY_THRESHOLDS.ordinary
+      ? `${EGG_QUALITY_THRESHOLDS.ordinary}=普通蛋`
+      : score < EGG_QUALITY_THRESHOLDS.good
+        ? `${EGG_QUALITY_THRESHOLDS.good}=较好蛋`
+        : score < EGG_QUALITY_THRESHOLDS.excellent
+          ? `${EGG_QUALITY_THRESHOLDS.excellent}=好蛋`
           : '已到好蛋';
-  return `当前 ${quality} ${snapshot.eggQualityScore}/4 · ${facts.join(' / ')} · ${next}`;
+  const facts = [
+    score < EGG_QUALITY_THRESHOLDS.ordinary
+      ? `差${EGG_QUALITY_THRESHOLDS.ordinary - score}到普通蛋`
+      : score < EGG_QUALITY_THRESHOLDS.good
+        ? `差${EGG_QUALITY_THRESHOLDS.good - score}到较好蛋`
+        : score < EGG_QUALITY_THRESHOLDS.excellent
+          ? `差${EGG_QUALITY_THRESHOLDS.excellent - score}到好蛋`
+          : '蛋势够好蛋',
+    snapshot.eggWildKinds > 0 ? '野味已并入蛋势' : '野味可补蛋势',
+    snapshot.eggDryRest ? '干燥不降段' : '潮湿降一段',
+  ];
+  return `当前 ${quality} · 蛋势 ${score} · ${facts.join(' / ')} · ${nextThreshold}`;
 }
 
 function renderEnding(snapshot: HudSnapshot) {

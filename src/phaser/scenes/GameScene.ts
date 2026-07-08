@@ -1167,9 +1167,9 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const duskSpan = Math.max(0.1, (NIGHT_AT - DUSK_AT) * DAY_ACTIVE_SECONDS);
-    const baseRate = 100 / duskSpan;
+    const baseRate = (100 / duskSpan) * 0.62;
     const multiplier = this.weaselApproachMultiplier(sprinting);
-    const noiseBonus = noisySeconds > 0 ? Math.min(8, noisySeconds * 3.2) : 0;
+    const noiseBonus = noisySeconds > 0 ? Math.min(5, noisySeconds * 1.9) : 0;
     this.state.weaselApproach = Phaser.Math.Clamp(
       this.state.weaselApproach + baseRate * actionSeconds * multiplier + noiseBonus,
       0,
@@ -1194,9 +1194,9 @@ export class GameScene extends Phaser.Scene {
       this.state.chicken.y,
       WORLD_HEIGHT - this.state.chicken.y,
     );
-    const edgeBonus = edgeDistance < 210 ? 0.45 : 0;
-    const sprintBonus = sprinting ? 0.22 : 0;
-    return 1 + farRatio * 1.45 + edgeBonus + sprintBonus;
+    const edgeBonus = edgeDistance < 210 ? 0.32 : 0;
+    const sprintBonus = sprinting ? 0.15 : 0;
+    return 1 + farRatio * 1.1 + edgeBonus + sprintBonus;
   }
 
   private updateRealtimeThreats(dt: number) {

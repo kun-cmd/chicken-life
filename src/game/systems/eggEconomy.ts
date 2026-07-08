@@ -15,6 +15,12 @@ export const EGG_BUDGET: Record<EggQuality, number> = {
   excellent: 5,
 };
 
+export const EGG_QUALITY_THRESHOLDS = {
+  ordinary: 40,
+  good: 60,
+  excellent: 74,
+} as const;
+
 const WILD_FOODS = new Set<ForagingFoodType>([
   'worm',
   'cricket',
@@ -25,21 +31,30 @@ const WILD_FOODS = new Set<ForagingFoodType>([
 
 export function evaluateEggQuality(input: EggQualityInput) {
   const wildKinds = new Set(input.foodsEaten.filter((food) => WILD_FOODS.has(food))).size;
-  let score = 0;
-
-  if (input.nutrition >= 35) score += 1;
-  if (input.nutrition >= 70) score += 1;
-  if (wildKinds >= 1) score += 1;
-  if (input.dryRest) score += 1;
-
-  const quality: EggQuality =
-    score >= 4 ? 'excellent' : score === 3 ? 'good' : score === 2 ? 'ordinary' : 'poor';
+  const wildBonus = Math.min(wildKinds * 8, 16);
+  const score = Math.max(0, Math.round(input.nutrition + wildBonus));
+  const baseQuality = eggQualityForPotential(score);
+  const quality = input.dryRest ? baseQuality : downgradeEggQuality(baseQuality);
   return {
     quality,
     budget: EGG_BUDGET[quality],
     score,
     wildKinds,
   };
+}
+
+function eggQualityForPotential(score: number): EggQuality {
+  if (score >= EGG_QUALITY_THRESHOLDS.excellent) return 'excellent';
+  if (score >= EGG_QUALITY_THRESHOLDS.good) return 'good';
+  if (score >= EGG_QUALITY_THRESHOLDS.ordinary) return 'ordinary';
+  return 'poor';
+}
+
+function downgradeEggQuality(quality: EggQuality): EggQuality {
+  if (quality === 'excellent') return 'good';
+  if (quality === 'good') return 'ordinary';
+  if (quality === 'ordinary') return 'poor';
+  return 'poor';
 }
 
 export function eggQualityLabel(quality: EggQuality) {
