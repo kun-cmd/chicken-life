@@ -10,7 +10,7 @@ import {
   evaluateEggQuality,
 } from '../src/game/systems/eggEconomy';
 import { pendingAwakening } from '../src/game/systems/abilities';
-import { tutorialForDay } from '../src/game/content/abilityTutorials';
+import { tutorialForAbility, tutorialForDay } from '../src/game/content/abilityTutorials';
 import {
   CORE_LOOP_TUNING,
   applyFlowEvent,
@@ -128,6 +128,7 @@ test('scratch becomes the day three territory skill', () => {
   assert.equal(pendingAwakening(2, state.profile), null);
   assert.equal(pendingAwakening(3, state.profile), 'scratch');
   assert.equal(tutorialForDay(3, state.profile.awakenedAbilities)?.ability, 'scratch');
+  assert.equal(tutorialForAbility('scratch')?.position, undefined);
 });
 
 test('night pressure covers egg nutrition and does not rise just because time passes', () => {

@@ -604,21 +604,24 @@ export function applyFlowEvent(state: GameState, event: DayFlowEvent) {
       tutorialForDay(state.day, state.profile.awakenedAbilities)?.ability ?? null;
     if (state.activeAbilityTutorial) {
       const tutorial = tutorialForAbility(state.activeAbilityTutorial);
-      state.message = tutorial?.prompt ?? '';
-      if (
-        tutorial &&
-        tutorial.ability === 'sprint' &&
-        !state.foods.some((food) => food.type === 'cricket' && distance(food, tutorial.position) < 24)
-      ) {
-        spawnFood(state, 'cricket', tutorial.position, state.time);
-      }
-      if (
-        tutorial &&
-        tutorial.ability === 'flutter' &&
-        !state.foods.some((food) => food.type === 'berry' && distance(food, tutorial.position) < 24)
-      ) {
-        spawnFood(state, 'berry', tutorial.position, state.time);
-      }
+    state.message = tutorial?.prompt ?? '';
+    const tutorialPosition = tutorial?.position;
+    if (
+      tutorial &&
+      tutorial.ability === 'sprint' &&
+      tutorialPosition &&
+      !state.foods.some((food) => food.type === 'cricket' && distance(food, tutorialPosition) < 24)
+    ) {
+      spawnFood(state, 'cricket', tutorialPosition, state.time);
+    }
+    if (
+      tutorial &&
+      tutorial.ability === 'flutter' &&
+      tutorialPosition &&
+      !state.foods.some((food) => food.type === 'berry' && distance(food, tutorialPosition) < 24)
+    ) {
+      spawnFood(state, 'berry', tutorialPosition, state.time);
+    }
     }
   }
 }

@@ -4,7 +4,7 @@ import type { Vec2 } from '../simulation/state';
 export interface AbilityTutorial {
   ability: AbilityId;
   day: number;
-  position: Vec2;
+  position?: Vec2;
   prompt: string;
 }
 
@@ -12,8 +12,7 @@ export const ABILITY_TUTORIALS: AbilityTutorial[] = [
   {
     ability: 'scratch',
     day: 3,
-    position: { x: 438, y: 548 },
-    prompt: '泥地有点松。靠近后按住 E 刨开一个自己的坑。',
+    prompt: '站到泥地上，按住 E 刨开一个自己的坑。',
   },
   {
     ability: 'sprint',

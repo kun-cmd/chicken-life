@@ -787,7 +787,7 @@ export class GameScene extends Phaser.Scene {
     const direction = normalize(actions.x, actions.y);
     const hasMove = direction.x !== 0 || direction.y !== 0;
     const sprintTutorial = this.state.activeAbilityTutorial === 'sprint';
-    const tutorialPoint = tutorialForAbility('sprint')!.position;
+    const tutorialPoint = tutorialForAbility('sprint')!.position!;
     const atSprintTutorial = sprintTutorial && distance(this.state.chicken, tutorialPoint) < 105;
     const canSprint =
       (canUseAbility(this.state.profile, 'sprint') || atSprintTutorial) &&
@@ -1038,13 +1038,11 @@ export class GameScene extends Phaser.Scene {
     let pausedOtherMovementSeconds = 0;
     let heatFreeActionSeconds = 0;
     const scratchTutorial = this.state.activeAbilityTutorial === 'scratch';
-    const scratchPoint = tutorialForAbility('scratch')!.position;
-    const atScratchTutorial = scratchTutorial && distance(this.state.chicken, scratchPoint) < 82;
+    const onScratchableGround = this.isScratchableGround(this.state.chicken);
     const buriedNightBug = this.nearestBuriedNightBug(70);
     const canScratchHere =
       !!buriedNightBug ||
-      (canUseAbility(this.state.profile, 'scratch') && !isOnPath(this.state.chicken)) ||
-      atScratchTutorial;
+      ((canUseAbility(this.state.profile, 'scratch') || scratchTutorial) && onScratchableGround);
 
     if (actions.scratchHeld && canScratchHere && this.digCooldown <= 0) {
       this.scratchProgress += dt;
@@ -1079,7 +1077,7 @@ export class GameScene extends Phaser.Scene {
         this.digCooldown = 2.2;
         this.playSfx(SFX_DIG_KEY, 0.54);
         this.cameras.main.shake(70, 0.002);
-        if (atScratchTutorial && dugHole) {
+        if (scratchTutorial && dugHole) {
           this.state.message = '坑刨好了。站在坑边按住 E，鸡会趴进去休息、降温。';
         }
       }
@@ -1098,7 +1096,7 @@ export class GameScene extends Phaser.Scene {
       const isTutorialTarget =
         this.state.activeAbilityTutorial === 'flutter' &&
         !!target &&
-        distance(target, tutorialForAbility('flutter')!.position) < 2;
+        distance(target, tutorialForAbility('flutter')!.position!) < 2;
       if (target && (canUseAbility(this.state.profile, 'flutter') || isTutorialTarget)) {
         this.performFlutter(target);
         if (isTutorialTarget && completeAbilityTutorial(this.state, 'flutter')) {
@@ -1672,6 +1670,10 @@ export class GameScene extends Phaser.Scene {
       }
     }
     return best;
+  }
+
+  private isScratchableGround(point: Vec2) {
+    return !isOnPath(point) && !isBlocked(point, 18);
   }
 
   private nearestBuriedNightBug(radius: number) {
