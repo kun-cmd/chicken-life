@@ -812,9 +812,7 @@ export class GameScene extends Phaser.Scene {
       this.chicken.scaleX = direction.x < -0.05 ? -1 : direction.x > 0.05 ? 1 : this.chicken.scaleX;
       this.state.facilityLife.idleSeconds = 0;
       this.state.facilityLife.needsMovement = false;
-      if (ownedFacilityAt(this.state.yard, this.state.chicken) !== 'loose-soil') {
-        this.state.facilityLife.dustBathReady = false;
-      }
+      this.state.facilityLife.dustBathReady = false;
     }
     if (canSprint) {
       this.state.foraging.sprintEnergy = Math.max(0, this.state.foraging.sprintEnergy - 30 * dt);
@@ -1007,6 +1005,10 @@ export class GameScene extends Phaser.Scene {
     const activeSeconds = dt * 0.72;
     if (this.state.facilityLife.activity !== 'hole-rest') {
       this.state.message = '鸡趴进自己刨过的坑里。松开 E 就会站起来。';
+      if (completeAbilityTutorial(this.state, 'scratch')) {
+        this.playSfx(SFX_UPGRADE_KEY, 0.62);
+        this.saveGame(true);
+      }
     }
     this.state.facilityLife.activity = 'hole-rest';
     this.state.facilityLife.activitySeconds = 0;
@@ -1023,16 +1025,6 @@ export class GameScene extends Phaser.Scene {
     let actionSeconds = 0;
     let diggingSeconds = 0;
     let huntingSeconds = 0;
-    const facility = ownedFacilityAt(this.state.yard, this.state.chicken);
-    if (
-      actions.interactPressed &&
-      facility === 'loose-soil' &&
-      this.state.facilityLife.dustBathReady &&
-      startFacilityActivity(this.state.facilityLife, 'dust-bath')
-    ) {
-      this.state.message = '鸡侧身钻进松土，开始扑腾着沙浴。';
-      return { actionSeconds: 0.6, diggingSeconds, huntingSeconds };
-    }
     const scratchTutorial = this.state.activeAbilityTutorial === 'scratch';
     const scratchPoint = tutorialForAbility('scratch')!.position;
     const atScratchTutorial = scratchTutorial && distance(this.state.chicken, scratchPoint) < 82;
@@ -1047,6 +1039,7 @@ export class GameScene extends Phaser.Scene {
       actionSeconds += dt * 1.4;
       diggingSeconds += dt * 1.4;
       if (this.scratchProgress >= 0.65) {
+        let dugHole: HoleEntity | null = null;
         if (buriedNightBug && revealBuriedNightBug(this.state, buriedNightBug)) {
           this.refreshFoodView(buriedNightBug);
         } else {
@@ -1054,6 +1047,7 @@ export class GameScene extends Phaser.Scene {
             x: this.state.chicken.x,
             y: this.state.chicken.y + 12,
           });
+          dugHole = hole;
           if (hole) {
             this.refreshHoleView(hole);
             this.showScratchDirtFx(hole);
@@ -1073,13 +1067,8 @@ export class GameScene extends Phaser.Scene {
         this.digCooldown = 2.2;
         this.playSfx(SFX_DIG_KEY, 0.54);
         this.cameras.main.shake(70, 0.002);
-        if (facility === 'loose-soil') {
-          this.state.facilityLife.dustBathReady = true;
-          this.state.message = '松土翻开了。松开再按 E，可以在这里沙浴。';
-        }
-        if (atScratchTutorial && completeAbilityTutorial(this.state, 'scratch')) {
-          this.playSfx(SFX_UPGRADE_KEY, 0.62);
-          this.saveGame(true);
+        if (atScratchTutorial && dugHole) {
+          this.state.message = '坑刨好了。站在坑边按住 E，鸡会趴进去休息、降温。';
         }
       }
       return { actionSeconds, diggingSeconds, huntingSeconds };
@@ -2119,13 +2108,7 @@ export class GameScene extends Phaser.Scene {
       if (!upgrade) continue;
       const { x, y } = upgrade.position;
 
-      if (id === 'loose-soil') {
-        g.fillStyle(0x6a432b, 0.86).fillEllipse(x, y, 116, 64);
-        g.lineStyle(3, 0x3f2b20, 0.6);
-        for (let offset = -36; offset <= 36; offset += 24) {
-          g.lineBetween(x + offset - 8, y - 10, x + offset + 8, y + 12);
-        }
-      } else if (id === 'shade-shelter') {
+      if (id === 'shade-shelter') {
         g.lineStyle(7, 0x694228, 1);
         g.lineBetween(x - 54, y - 28, x - 54, y + 38);
         g.lineBetween(x + 54, y - 28, x + 54, y + 38);

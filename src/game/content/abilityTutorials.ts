@@ -12,8 +12,8 @@ export const ABILITY_TUTORIALS: AbilityTutorial[] = [
   {
     ability: 'scratch',
     day: 3,
-    position: { x: 610, y: 565 },
-    prompt: '松土下面有细响。靠近后按住 E 刨开泥土。',
+    position: { x: 438, y: 548 },
+    prompt: '泥地有点松。靠近后按住 E 刨开一个自己的坑。',
   },
   {
     ability: 'sprint',

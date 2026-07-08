@@ -682,7 +682,7 @@ export function completeAbilityTutorial(state: GameState, ability: AbilityId) {
 export function spawnScratchWorm(state: GameState, position: Vec2) {
   const worm = spawnFood(state, 'worm', position, state.time);
   worm.expiresAt = clamp01(state.time + 0.08);
-  state.message = '松土里翻出了一条蚯蚓！';
+  state.message = '泥地里翻出了一条蚯蚓！';
   return worm;
 }
 
@@ -890,8 +890,7 @@ function baseHoleMoisture(state: GameState, position: Vec2) {
 }
 
 function physicalHoleKind(state: GameState, hole: HoleEntity): Exclude<HoleTerritoryKind, 'safe-rest'> {
-  const facility = ownedFacilityAt(state.yard, hole);
-  if (facility === 'loose-soil' || (hole.moisture < 0.28 && hole.depth >= 2)) {
+  if (hole.moisture < 0.28 && hole.depth >= 2) {
     return 'dust-bath';
   }
   if (isShadowy(hole) || hole.moisture >= 0.46 || hole.depth >= 3) return 'cool-pit';
@@ -2023,15 +2022,14 @@ function goalTipFor(state: GameState) {
   }
   if (state.weasel.active) return '黄鼠狼来了：沿熟悉路线冲回鸡窝。';
   const facility = ownedFacilityAt(state.yard, state.chicken);
-  if (state.facilityLife.activity === 'dust-bath') return '正在松土里沙浴。';
+  if (state.facilityLife.activity === 'dust-bath') return '正在沙浴地里沙浴。';
   if (state.facilityLife.activity === 'shade-rest') return '正在遮阴棚下休息和梳理羽毛。';
   if (state.facilityLife.activity === 'hole-rest') return '正在自己刨过的坑里休息。';
   if (state.facilityLife.activity === 'perch-idle') return '正在低栖木上站稳、看看院子。';
-  if (state.facilityLife.dustBathReady && facility === 'loose-soil') return '松开再按 E，在松土里沙浴。';
   if (facility === 'shade-shelter') return '在遮阴棚里停下 2.5 秒，可以休息。';
   if (facility === 'low-perch') return '靠近低栖木按 F 跳上去，停稳后会栖息。';
   const controls = ['空格啄食 / 咯咯叫'];
-  if (state.profile.awakenedAbilities.scratch) controls.push('E 刨松土');
+  if (state.profile.awakenedAbilities.scratch) controls.push('E 刨坑');
   if (state.profile.awakenedAbilities.sprint) controls.push('Shift 冲刺');
   if (state.profile.awakenedAbilities.flutter) controls.push('F 扑翅');
   return controls.join(' · ');

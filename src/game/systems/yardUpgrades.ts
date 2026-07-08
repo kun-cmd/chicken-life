@@ -7,7 +7,7 @@ export interface YardUpgradeState {
   owned: YardUpgradeId[];
 }
 
-export type FacilityId = Extract<YardUpgradeId, 'loose-soil' | 'shade-shelter' | 'low-perch'>;
+export type FacilityId = Extract<YardUpgradeId, 'shade-shelter' | 'low-perch'>;
 export type FacilityActivity = 'dust-bath' | 'shade-rest' | 'perch-idle' | 'hole-rest';
 
 export interface FacilityLifeState {
@@ -67,7 +67,7 @@ export function ownedFacilityAt(
   point: Vec2,
   radius = FACILITY_ZONE_RADIUS,
 ): FacilityId | null {
-  for (const id of ['loose-soil', 'shade-shelter', 'low-perch'] as const) {
+  for (const id of ['shade-shelter', 'low-perch'] as const) {
     if (!yard.owned.includes(id)) continue;
     const facility = YARD_UPGRADES.find((upgrade) => upgrade.id === id)!;
     if (Math.hypot(point.x - facility.position.x, point.y - facility.position.y) <= radius) {

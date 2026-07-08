@@ -48,8 +48,8 @@ test('coop upgrades ease the dusk ritual without replacing it', () => {
 test('owned life facilities expose their world zones', () => {
   const yard = createYardUpgradeState();
   assert.equal(ownedFacilityAt(yard, { x: 610, y: 565 }), null);
-  yard.owned.push('loose-soil', 'shade-shelter');
-  assert.equal(ownedFacilityAt(yard, { x: 610, y: 565 }), 'loose-soil');
+  yard.owned.push('shade-shelter');
+  assert.equal(ownedFacilityAt(yard, { x: 610, y: 565 }), null);
   assert.equal(ownedFacilityAt(yard, { x: 930, y: 600 }), 'shade-shelter');
 });
 

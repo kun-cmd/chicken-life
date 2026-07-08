@@ -1,7 +1,6 @@
 import type { Vec2 } from '../simulation/state';
 
 export type YardUpgradeId =
-  | 'loose-soil'
   | 'shade-shelter'
   | 'low-perch'
   | 'water-basin'
@@ -59,13 +58,6 @@ export const YARD_UPGRADES: YardUpgradeDefinition[] = [
     cost: 5,
     position: COOP_ROOF_POSITION,
     effect: '雨夜保持干燥，避免次日蛋品质因淋雨下降',
-  },
-  {
-    id: 'loose-soil',
-    name: '有顶沙浴箱',
-    cost: 6,
-    position: { x: 610, y: 565 },
-    effect: '稳定出现蚯蚓，雨天也能保持可沙浴的干土',
   },
   {
     id: 'low-perch',
