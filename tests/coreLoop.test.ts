@@ -91,7 +91,7 @@ test('egg quality follows potential tiers, wild food bonus, and wet downgrade', 
     dryRest: true,
   });
   const wildBoosted = evaluateEggQuality({
-    nutrition: 52,
+    nutrition: 56,
     foodsEaten: ['worm'],
     dryRest: true,
   });
@@ -126,7 +126,7 @@ test('premium feed pieces visibly count as richer grain nutrition', () => {
     eatFood(state, food);
   }
 
-  assert.equal(state.nutrition, 72);
+  assert.equal(state.nutrition, 69);
 });
 
 test('scratch becomes the day three territory skill', () => {

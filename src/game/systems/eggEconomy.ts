@@ -31,7 +31,7 @@ const WILD_FOODS = new Set<ForagingFoodType>([
 
 export function evaluateEggQuality(input: EggQualityInput) {
   const wildKinds = new Set(input.foodsEaten.filter((food) => WILD_FOODS.has(food))).size;
-  const wildBonus = Math.min(wildKinds * 8, 16);
+  const wildBonus = Math.min(wildKinds * 4, 8);
   const score = Math.max(0, Math.round(input.nutrition + wildBonus));
   const baseQuality = eggQualityForPotential(score);
   const quality = input.dryRest ? baseQuality : downgradeEggQuality(baseQuality);

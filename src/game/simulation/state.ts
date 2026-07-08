@@ -402,10 +402,11 @@ export interface HudSnapshot {
 const DAY_SECONDS = DAY_ACTIVE_SECONDS;
 const DUSK_START = 0.58;
 const NIGHT_START = 0.82;
-const KEEPER_FEED_END = 0.25;
+const KEEPER_FEED_END = DUSK_START;
 const NUTRITION_LIMIT = 100;
-const FOOD_NUTRITION_GAIN_SCALE = 0.85;
-const PREMIUM_FEED_NUTRITION_GAIN = 5;
+const FOOD_NUTRITION_GAIN_SCALE = 0.7;
+const PREMIUM_FEED_NUTRITION_GAIN = 4;
+const SUNFLOWER_NUTRITION_GAIN = 3;
 const HOLE_HEAT_COOLING_SCALE = 1.4;
 const DIG_SPRINT_COST = 28;
 const WATER_BOOST_LIMIT = 100;
@@ -417,6 +418,9 @@ const CAT_END = 0.58;
 const CAT_VISIT_CHANCE = 0.5;
 const KEEPER_RESCUE_AFFECTION = 60;
 const KEEPER_SWIFT_RESCUE_AFFECTION = 85;
+const KEEPER_VISIT_DELAY_MIN = 18;
+const KEEPER_VISIT_DELAY_RANDOM = 36;
+const KEEPER_SUNFLOWER_LIMIT = 3;
 export const CORE_LOOP_TUNING = {
   predatorContactPressure: 34,
   porchLightReliefMin: 5,
@@ -595,6 +599,7 @@ export function applyFlowEvent(state: GameState, event: DayFlowEvent) {
     previousPhase !== 'chicken-day' &&
     state.flow.phase === 'chicken-day'
   ) {
+    scheduleKeeperFeeding(state);
     state.activeAbilityTutorial =
       tutorialForDay(state.day, state.profile.awakenedAbilities)?.ability ?? null;
     if (state.activeAbilityTutorial) {
@@ -616,6 +621,20 @@ export function applyFlowEvent(state: GameState, event: DayFlowEvent) {
       }
     }
   }
+}
+
+function scheduleKeeperFeeding(state: GameState) {
+  if (state.keeper.rescuing) return;
+  state.keeper = {
+    ...KEEPER_START,
+    active: false,
+    returning: false,
+    doneFeeding: false,
+    rescuing: false,
+    routeIndex: 1,
+    scatterCooldown: KEEPER_VISIT_DELAY_MIN + Math.random() * KEEPER_VISIT_DELAY_RANDOM,
+    facing: 1,
+  };
 }
 
 export function currentRelationshipStage(state: GameState) {
@@ -1007,13 +1026,17 @@ export function updateKeeper(state: GameState, moveDt: number, clockDt = moveDt)
   }
 
   if (!state.keeper.active) {
+    state.keeper.scatterCooldown -= clockDt;
+    if (state.keeper.scatterCooldown > 0) return null;
     state.keeper.active = true;
     state.keeper.returning = false;
     state.keeper.routeIndex = 1;
-    state.keeper.scatterCooldown = 1.6;
+    state.keeper.scatterCooldown = 2.2 + Math.random() * 2.2;
+    if (!state.message) state.message = '养鸡人拎着小桶走进院子，准备撒几粒瓜子。';
+    return null;
   }
 
-  if (state.time >= KEEPER_FEED_END || state.phase !== 'day') {
+  if (keeperSunflowerCount(state) >= KEEPER_SUNFLOWER_LIMIT || state.time >= KEEPER_FEED_END || state.phase !== 'day') {
     state.keeper.returning = true;
   }
 
@@ -1039,11 +1062,18 @@ export function updateKeeper(state: GameState, moveDt: number, clockDt = moveDt)
 
   state.keeper.scatterCooldown -= clockDt;
   if (!state.keeper.returning && state.phase === 'day' && state.time > 0.08 && state.keeper.scatterCooldown <= 0) {
-    state.keeper.scatterCooldown = 5.2 + Math.random() * 1.6;
+    state.keeper.scatterCooldown = 9 + Math.random() * 4;
     return scatterSunflowerSeed(state);
   }
 
   return null;
+}
+
+function keeperSunflowerCount(state: GameState) {
+  return (
+    state.eaten.sunflower +
+    state.foods.filter((food) => food.type === 'sunflower' && food.fromKeeper).length
+  );
 }
 
 export function peckFood(state: GameState, food: FoodEntity) {
@@ -3155,7 +3185,7 @@ function nutritionFor(food: FoodEntity) {
   if (type === 'cricket') return scaledNutritionGain(7);
   if (type === 'beetle') return scaledNutritionGain(10);
   if (type === 'berry') return scaledNutritionGain(6);
-  if (type === 'sunflower') return scaledNutritionGain(6);
+  if (type === 'sunflower') return scaledNutritionGain(SUNFLOWER_NUTRITION_GAIN);
   if (type === 'meat') return scaledNutritionGain(12);
   return scaledNutritionGain(13);
 }
@@ -3190,6 +3220,7 @@ function hardFoodPeckMessage(type: FoodType, remaining: number) {
 function keeperLabel(state: GameState) {
   if (state.mode !== 'chicken') return '找蛋时间';
   if (state.keeper.doneFeeding) return '人已经回屋';
+  if (!state.keeper.active) return '人还没出来';
   if (state.keeper.returning) return '人在回房子';
   if (state.phase === 'night') return '人已经回屋';
   if (state.phase === 'dusk') return '人在收拾院子';

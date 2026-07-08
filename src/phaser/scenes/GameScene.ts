@@ -656,6 +656,7 @@ export class GameScene extends Phaser.Scene {
       storyPhase === 'chicken-night'
     ) {
       this.updateChicken(dt, actions);
+      this.updateKeeperFeeding(dt);
     }
 
     this.updateAmbientNightCues(dt);
@@ -1055,12 +1056,15 @@ export class GameScene extends Phaser.Scene {
             this.showScratchDirtFx(hole);
           }
           const holeMessage = hole ? this.state.message : '';
-          const worm = spawnScratchWorm(this.state, {
-            x: this.state.chicken.x + (this.chicken.scaleX >= 0 ? 24 : -24),
-            y: this.state.chicken.y + 10,
-          });
-          if (holeMessage) this.state.message = `${holeMessage} 旁边还翻出了一条蚯蚓。`;
-          this.foodViews.set(worm.id, this.createFoodView(worm));
+          const canFindWorm = hole && hole.depth === 1 && Math.random() < 0.38;
+          if (canFindWorm) {
+            const worm = spawnScratchWorm(this.state, {
+              x: this.state.chicken.x + (this.chicken.scaleX >= 0 ? 24 : -24),
+              y: this.state.chicken.y + 10,
+            });
+            if (holeMessage) this.state.message = `${holeMessage} 旁边还翻出了一条蚯蚓。`;
+            this.foodViews.set(worm.id, this.createFoodView(worm));
+          }
         }
         this.scratchProgress = 0;
         this.digCooldown = 2.2;
@@ -2472,6 +2476,14 @@ export class GameScene extends Phaser.Scene {
     const mark = this.add.ellipse(4, -6, 6, 9, golden ? 0xffef92 : 0xe8c982, 0.72);
     this.eggView = this.add.container(this.state.egg.x, this.state.egg.y, [glow, egg, mark]).setDepth(45);
     this.eggView.setVisible(visible);
+  }
+
+  private updateKeeperFeeding(dt: number) {
+    const seed = updateKeeper(this.state, dt, dt);
+    if (!seed) return;
+    this.foodViews.set(seed.id, this.createFoodView(seed));
+    this.showScatterFx(seed);
+    this.playSfx(SFX_PECK_KEY, 0.28);
   }
 
   private revealEgg() {
