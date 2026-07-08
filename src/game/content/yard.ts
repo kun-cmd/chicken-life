@@ -56,7 +56,6 @@ export const KEEPER_ROUTE: Vec2[] = [
   { x: 700, y: 730 },
   { x: 800, y: 845 },
   { x: 700, y: 930 },
-  { x: 750, y: 386 },
 ];
 
 export const TREE_POSITIONS: Vec2[] = [

@@ -105,6 +105,29 @@ test('keeper daytime route stays on paved paths', () => {
   }
 });
 
+test('keeper returns home after one daytime S route', () => {
+  const state = createGameState();
+  const lastPoint = KEEPER_ROUTE[KEEPER_ROUTE.length - 1];
+  state.mode = 'chicken';
+  state.phase = 'day';
+  state.time = 0.3;
+  state.keeper = {
+    ...state.keeper,
+    active: true,
+    returning: false,
+    doneFeeding: false,
+    rescuing: false,
+    routeIndex: KEEPER_ROUTE.length - 1,
+    scatterCooldown: 99,
+    x: lastPoint.x,
+    y: lastPoint.y,
+  };
+
+  assert.equal(updateKeeper(state, 0, 0.1), null);
+  assert.equal(state.keeper.returning, true);
+  assert.equal(state.keeper.routeIndex, KEEPER_ROUTE.length - 1);
+});
+
 test('expired keeper sunflower seeds are removed from the yard', () => {
   const state = createGameState();
   state.mode = 'chicken';

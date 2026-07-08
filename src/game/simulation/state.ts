@@ -1052,7 +1052,11 @@ export function updateKeeper(state: GameState, moveDt: number, clockDt = moveDt)
       state.message = '养鸡人收起小桶回房子了，院子安静下来。';
       return null;
     }
-    state.keeper.routeIndex = (state.keeper.routeIndex + 1) % KEEPER_ROUTE.length;
+    if (state.keeper.routeIndex >= KEEPER_ROUTE.length - 1) {
+      state.keeper.returning = true;
+    } else {
+      state.keeper.routeIndex += 1;
+    }
   } else {
     const step = Math.min(length, keeperSpeed * moveDt);
     state.keeper.x += (vector.x / length) * step;
