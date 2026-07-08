@@ -211,6 +211,7 @@ function renderHud(snapshot: HudSnapshot) {
     hud.rewardTitle.textContent = snapshot.reward.title;
     hud.rewardName.textContent = snapshot.reward.name;
     hud.rewardEffect.textContent = snapshot.reward.effect;
+    hud.rewardEffect.hidden = snapshot.reward.effect.length === 0;
     hud.rewardPanel.hidden = false;
     hud.rewardPanel.classList.add('reward-panel--show');
     window.clearTimeout(rewardTimer);
@@ -261,7 +262,6 @@ function eggPressureText(snapshot: HudSnapshot) {
         : score < EGG_QUALITY_THRESHOLDS.excellent
           ? `差${EGG_QUALITY_THRESHOLDS.excellent - score}到金蛋`
           : '蛋势够金蛋',
-    snapshot.eggWildKinds > 0 ? '野味已并入蛋势' : '野味可补蛋势',
     snapshot.eggDryRest ? '干燥不降段' : '潮湿降一段',
   ];
   return `当前 ${quality} · 蛋势 ${score} · ${facts.join(' / ')} · ${nextThreshold}`;
@@ -321,9 +321,9 @@ function renderYardPanel(snapshot: HudSnapshot) {
       row.className = 'album-entry';
       const name = document.createElement('strong');
       name.textContent = `${egg.name} ×${egg.count}`;
-      const effect = document.createElement('span');
-      effect.textContent = egg.effect;
-      row.append(name, effect);
+      const budget = document.createElement('span');
+      budget.textContent = `院子预算 +${egg.budget}`;
+      row.append(name, budget);
       hud.eggAlbumList.append(row);
     }
   }

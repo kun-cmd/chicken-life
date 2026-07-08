@@ -121,8 +121,8 @@ test('different coordinates resolve to different regions', () => {
   // Main path -> 'main-path'
   assert.equal(yardRegionFor({ x: 750, y: 500 }), 'main-path');
 
-  // Tree area -> 'tree-shade'
-  assert.equal(yardRegionFor({ x: 200, y: 290 }), 'tree-shade');
+  // Tree area away from the pond -> 'tree-shade'
+  assert.equal(yardRegionFor({ x: 260, y: 748 }), 'tree-shade');
 });
 
 test('regionFamiliarityFor returns correct value for point', () => {

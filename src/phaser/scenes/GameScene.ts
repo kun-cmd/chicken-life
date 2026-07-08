@@ -710,6 +710,8 @@ export class GameScene extends Phaser.Scene {
     let diggingSeconds = 0;
     let huntingSeconds = 0;
     let holeRestSeconds = 0;
+    let pausedOtherMovementSeconds = 0;
+    let heatFreeActionSeconds = 0;
     this.expireAndSyncFoods();
     if (
       this.state.facilityLife.activity === 'hole-rest' &&
@@ -850,6 +852,8 @@ export class GameScene extends Phaser.Scene {
         actionSeconds += handled.actionSeconds;
         diggingSeconds += handled.diggingSeconds;
         huntingSeconds += handled.huntingSeconds;
+        pausedOtherMovementSeconds += handled.pausedOtherMovementSeconds;
+        heatFreeActionSeconds += handled.heatFreeActionSeconds;
       }
     }
     if (!this.state.facilityLife.activity) this.updateFacilityIdle(dt, hasMove);
@@ -859,6 +863,7 @@ export class GameScene extends Phaser.Scene {
       ownedFacilityAt(this.state.yard, this.state.chicken) === 'shade-shelter' ||
       holeRestSeconds > 0;
     if (actionSeconds > 0) {
+      const movingWorldSeconds = Math.max(0, actionSeconds - pausedOtherMovementSeconds);
       if (hasMove) {
         const explored = recordRegionExploration(
           this.state.yardFamiliarity,
@@ -882,13 +887,18 @@ export class GameScene extends Phaser.Scene {
           markTipShownForRegion(this.state.yardFamiliarity, explored.region);
         }
       }
-      this.updateMovingFoods(actionSeconds);
+      this.updateMovingFoods(movingWorldSeconds);
       if (updateWeatherExposure(this.state, actionSeconds)) {
         this.state.message = '雨水把泥地打湿了，鸡爪和腹羽都沾上了一点泥。';
       }
       const heatSeconds = Math.max(
         0,
-        actionSeconds - (drinking ? dt : 0) - diggingSeconds - huntingSeconds - holeRestSeconds,
+        actionSeconds -
+          (drinking ? dt : 0) -
+          diggingSeconds -
+          huntingSeconds -
+          holeRestSeconds -
+          heatFreeActionSeconds,
       );
       if (heatSeconds > 0) {
         advanceChickenHeat(this.state, heatSeconds, {
@@ -922,7 +932,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       this.advanceChickenWorld(actionSeconds);
-      this.updateKeeperFeeding(actionSeconds);
+      this.updateKeeperFeeding(movingWorldSeconds);
       this.updateWeaselApproach(actionSeconds, canSprint, diggingSeconds + huntingSeconds);
       this.updateChickenPressure(actionSeconds);
     }
@@ -1025,6 +1035,8 @@ export class GameScene extends Phaser.Scene {
     let actionSeconds = 0;
     let diggingSeconds = 0;
     let huntingSeconds = 0;
+    let pausedOtherMovementSeconds = 0;
+    let heatFreeActionSeconds = 0;
     const scratchTutorial = this.state.activeAbilityTutorial === 'scratch';
     const scratchPoint = tutorialForAbility('scratch')!.position;
     const atScratchTutorial = scratchTutorial && distance(this.state.chicken, scratchPoint) < 82;
@@ -1071,7 +1083,13 @@ export class GameScene extends Phaser.Scene {
           this.state.message = '坑刨好了。站在坑边按住 E，鸡会趴进去休息、降温。';
         }
       }
-      return { actionSeconds, diggingSeconds, huntingSeconds };
+      return {
+        actionSeconds,
+        diggingSeconds,
+        huntingSeconds,
+        pausedOtherMovementSeconds,
+        heatFreeActionSeconds,
+      };
     }
     if (!actions.scratchHeld) this.scratchProgress = 0;
 
@@ -1087,7 +1105,13 @@ export class GameScene extends Phaser.Scene {
           this.playSfx(SFX_UPGRADE_KEY, 0.62);
           this.saveGame(true);
         }
-        return { actionSeconds: 2.2, diggingSeconds, huntingSeconds };
+        return {
+          actionSeconds: 2.2,
+          diggingSeconds,
+          huntingSeconds,
+          pausedOtherMovementSeconds,
+          heatFreeActionSeconds,
+        };
       }
       this.state.message = canUseAbility(this.state.profile, 'flutter')
         ? '这里没有适合扑翅跳上的矮桩。'
@@ -1105,14 +1129,18 @@ export class GameScene extends Phaser.Scene {
           this.showPeckFx(food);
           const peckSeconds = foodPeckSeconds(food.type, result);
           actionSeconds += peckSeconds;
+          pausedOtherMovementSeconds += peckSeconds;
           if (isHuntingFood(food.type)) huntingSeconds += peckSeconds;
+          if (isHeatFreeFood(food.type)) heatFreeActionSeconds += peckSeconds;
         } else if (result === 'pecked') {
           this.refreshFoodView(food);
           this.playSfx(SFX_PECK_KEY, 0.36);
           this.showPeckFx(food);
           const peckSeconds = foodPeckSeconds(food.type, result);
           actionSeconds += peckSeconds;
+          pausedOtherMovementSeconds += peckSeconds;
           if (isHuntingFood(food.type)) huntingSeconds += peckSeconds;
+          if (isHeatFreeFood(food.type)) heatFreeActionSeconds += peckSeconds;
         } else {
           this.showGroundPeck();
           actionSeconds += 0.9;
@@ -1128,10 +1156,18 @@ export class GameScene extends Phaser.Scene {
         this.scareAnimalViews(result.scaredIds);
         this.peckCooldown = 0.32;
         actionSeconds += 0.85;
+        pausedOtherMovementSeconds += 0.85;
+        heatFreeActionSeconds += 0.85;
       }
     }
 
-    return { actionSeconds, diggingSeconds, huntingSeconds };
+    return {
+      actionSeconds,
+      diggingSeconds,
+      huntingSeconds,
+      pausedOtherMovementSeconds,
+      heatFreeActionSeconds,
+    };
   }
 
   private advanceChickenWorld(actionSeconds: number) {
@@ -3156,6 +3192,10 @@ function isTouchOptionOrNull(value: unknown): value is TouchOption | null {
 
 function isHuntingFood(type: FoodEntity['type']) {
   return type === 'cricket' || type === 'beetle' || type === 'nightBug';
+}
+
+function isHeatFreeFood(type: FoodEntity['type']) {
+  return type === 'grain' || type === 'grass' || type === 'sunflower';
 }
 
 function huntingFoodTextureSteps(type: FoodEntity['type']) {

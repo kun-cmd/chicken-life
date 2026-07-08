@@ -69,35 +69,29 @@ test('sprinting heats the chicken while shade and water cool it', () => {
   assert.equal(sprintScaleForHeat(BODY_COMFORT_TUNING.maxHeat), BODY_COMFORT_TUNING.minimumSprintScale);
 });
 
-test('egg quality follows potential tiers, wild food bonus, and wet downgrade', () => {
+test('egg quality follows nutrition tiers and wet downgrade', () => {
   const poor = evaluateEggQuality({
     nutrition: 39,
-    foodsEaten: [],
     dryRest: true,
   });
   const ordinary = evaluateEggQuality({
     nutrition: 40,
-    foodsEaten: [],
     dryRest: true,
   });
   const good = evaluateEggQuality({
     nutrition: 60,
-    foodsEaten: [],
     dryRest: true,
   });
   const excellent = evaluateEggQuality({
     nutrition: 80,
-    foodsEaten: [],
     dryRest: true,
   });
-  const wildBoosted = evaluateEggQuality({
+  const richButNotBoosted = evaluateEggQuality({
     nutrition: 56,
-    foodsEaten: ['worm'],
     dryRest: true,
   });
   const wetDowngraded = evaluateEggQuality({
     nutrition: 80,
-    foodsEaten: [],
     dryRest: false,
   });
   assert.equal(poor.quality, 'poor');
@@ -107,8 +101,8 @@ test('egg quality follows potential tiers, wild food bonus, and wet downgrade', 
   assert.equal(good.quality, 'good');
   assert.equal(excellent.quality, 'excellent');
   assert.equal(excellent.budget, 5);
-  assert.equal(wildBoosted.score, 60);
-  assert.equal(wildBoosted.quality, 'good');
+  assert.equal(richButNotBoosted.score, 56);
+  assert.equal(richButNotBoosted.quality, 'ordinary');
   assert.equal(wetDowngraded.score, 80);
   assert.equal(wetDowngraded.quality, 'good');
 });
@@ -126,7 +120,7 @@ test('premium feed pieces visibly count as richer grain nutrition', () => {
     eatFood(state, food);
   }
 
-  assert.equal(state.nutrition, 69);
+  assert.equal(state.nutrition, 72);
 });
 
 test('scratch becomes the day three territory skill', () => {
@@ -288,6 +282,23 @@ test('food raises egg momentum at the slower tuned rate', () => {
     x: state.chicken.x,
     y: state.chicken.y,
     type: 'grain' as const,
+    visibleAt: 0,
+  };
+  state.foods.push(food);
+
+  eatFood(state, food);
+
+  assert.equal(state.nutrition, 3);
+});
+
+test('grass now matches grain nutrition', () => {
+  const state = createGameState();
+  state.nutrition = 0;
+  const food = {
+    id: 1000,
+    x: state.chicken.x,
+    y: state.chicken.y,
+    type: 'grass' as const,
     visibleAt: 0,
   };
   state.foods.push(food);

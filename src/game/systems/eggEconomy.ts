@@ -1,10 +1,7 @@
-import type { ForagingFoodType } from './foraging';
-
 export type EggQuality = 'poor' | 'ordinary' | 'good' | 'excellent';
 
 export interface EggQualityInput {
   nutrition: number;
-  foodsEaten: readonly ForagingFoodType[];
   dryRest: boolean;
 }
 
@@ -21,25 +18,14 @@ export const EGG_QUALITY_THRESHOLDS = {
   excellent: 80,
 } as const;
 
-const WILD_FOODS = new Set<ForagingFoodType>([
-  'worm',
-  'cricket',
-  'beetle',
-  'berry',
-  'nightBug',
-]);
-
 export function evaluateEggQuality(input: EggQualityInput) {
-  const wildKinds = new Set(input.foodsEaten.filter((food) => WILD_FOODS.has(food))).size;
-  const wildBonus = Math.min(wildKinds * 4, 8);
-  const score = Math.max(0, Math.round(input.nutrition + wildBonus));
+  const score = Math.max(0, Math.round(input.nutrition));
   const baseQuality = eggQualityForPotential(score);
   const quality = input.dryRest ? baseQuality : downgradeEggQuality(baseQuality);
   return {
     quality,
     budget: EGG_BUDGET[quality],
     score,
-    wildKinds,
   };
 }
 

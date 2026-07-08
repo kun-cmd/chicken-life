@@ -65,14 +65,14 @@ export function yardRegionFor(point: Vec2): YardRegionId {
     return 'main-path';
   }
 
-  const treeDist = nearestTreeDistance(point);
-  if (treeDist < 110) {
-    return 'tree-shade';
-  }
-
   const pondDist = nearestPondDistance(point);
   if (pondDist < 130) {
     return 'pond-bank';
+  }
+
+  const treeDist = nearestTreeDistance(point);
+  if (treeDist < 110) {
+    return 'tree-shade';
   }
 
   if (isInsideRect(point, COOP, 14)) {

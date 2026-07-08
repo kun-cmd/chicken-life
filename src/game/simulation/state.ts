@@ -109,6 +109,7 @@ import {
   type HeatContext,
 } from '../systems/bodyComfort';
 import {
+  EGG_BUDGET,
   eggQualityLabel,
   evaluateEggQuality,
   type EggQuality,
@@ -181,7 +182,6 @@ export interface HoleEntity extends Vec2 {
 export interface EggEntity extends Vec2 {
   type: EggType;
   name: string;
-  effect: string;
   found: boolean;
   quality: EggQuality;
   budget: number;
@@ -190,9 +190,8 @@ export interface EggEntity extends Vec2 {
 export interface EggArchiveEntry {
   type: EggType;
   name: string;
-  effect: string;
-  upgrade: string;
   quality?: EggQuality;
+  budget: number;
   count: number;
 }
 
@@ -388,7 +387,6 @@ export interface HudSnapshot {
   currentEggBudget: number;
   projectedEggQuality: EggQuality;
   eggQualityScore: number;
-  eggWildKinds: number;
   eggDryRest: boolean;
   daySummary: DaySummary | null;
   goalTip: string;
@@ -404,7 +402,7 @@ const DUSK_START = 0.58;
 const NIGHT_START = 0.82;
 const KEEPER_FEED_END = DUSK_START;
 const NUTRITION_LIMIT = 100;
-const FOOD_NUTRITION_GAIN_SCALE = 0.7;
+const FOOD_NUTRITION_GAIN_SCALE = 1;
 const PREMIUM_FEED_NUTRITION_GAIN = 4;
 const SUNFLOWER_NUTRITION_GAIN = 3;
 const HOLE_HEAT_COOLING_SCALE = 1.4;
@@ -449,7 +447,6 @@ function createTutorialEgg(): EggEntity {
     ...EGG_SPOTS[0].position,
     type: 'balanced',
     name: eggQualityLabel('poor'),
-    effect: '找到蛋后，才放心把鸡放进院子。',
     found: false,
     quality: 'poor',
     budget: 2,
@@ -1618,7 +1615,6 @@ export function startEpilogueMorning(state: GameState) {
     ...spot.position,
     type: 'balanced',
     name: '温热的纪念蛋',
-    effect: '这枚蛋记着两周以来的小院生活。',
     found: false,
     quality: 'excellent',
     budget: 5,
@@ -1652,7 +1648,7 @@ export function collectKeepsakeEgg(state: GameState) {
   state.reward = {
     title: '清晨的礼物',
     name: state.egg.name,
-    effect: state.egg.effect,
+    effect: '',
   };
   state.message = '蛋还带着温度。两周的小院日子，一段一段地亮了起来。';
   return true;
@@ -1787,7 +1783,7 @@ export function collectEgg(state: GameState) {
   state.reward = {
     title: '找到鸡蛋',
     name: state.egg.name,
-    effect: state.egg.effect,
+    effect: `院子预算 +${earnedBudget}`,
   };
   state.message = `这枚蛋是${eggQualityLabel(state.egg.quality)}，院子预算 +${earnedBudget}。还可以再照料鸡；准备好后回房门口按 E 回屋。`;
   return true;
@@ -1853,7 +1849,6 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
   const nutritionPressure = nutritionPressureFor(state);
   const projectedEgg = evaluateEggQuality({
     nutrition: nutritionPressure.effectiveNutrition,
-    foodsEaten: state.foraging.foodsEatenToday,
     dryRest: state.dryRestTonight,
   });
   const snapshot: HudSnapshot = {
@@ -1902,6 +1897,7 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     eggArchive: state.eggArchive.map((entry) => ({
       ...entry,
       name: archiveEggDisplayName(entry),
+      budget: archiveEggBudget(entry),
     })),
     yard: {
       wood: state.yard.wood,
@@ -1920,7 +1916,6 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
     currentEggBudget: state.egg?.budget ?? 0,
     projectedEggQuality: projectedEgg.quality,
     eggQualityScore: projectedEgg.score,
-    eggWildKinds: projectedEgg.wildKinds,
     eggDryRest: state.dryRestTonight,
     daySummary: state.daySummary ? { ...state.daySummary, eaten: { ...state.daySummary.eaten } } : null,
     goalTip: goalTipFor(state),
@@ -1942,6 +1937,19 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
 function archiveEggDisplayName(entry: EggArchiveEntry) {
   if (entry.quality) return eggQualityLabel(entry.quality);
   return isQualityEggName(entry.name) ? entry.name : '普通蛋';
+}
+
+function archiveEggBudget(entry: EggArchiveEntry) {
+  if (Number.isFinite(entry.budget)) return clamp(Math.round(entry.budget), 2, 5);
+  return EGG_BUDGET[archiveEggQuality(entry)];
+}
+
+function archiveEggQuality(entry: Pick<EggArchiveEntry, 'quality' | 'name'>): EggQuality {
+  if (entry.quality) return entry.quality;
+  if (entry.name === '金蛋') return 'excellent';
+  if (entry.name === '较好蛋') return 'good';
+  if (entry.name === '差蛋') return 'poor';
+  return 'ordinary';
 }
 
 function isQualityEggName(name: string) {
@@ -2388,12 +2396,10 @@ export function debugJumpToDusk(state: GameState) {
 
 export function debugSetEggType(state: GameState, type: EggType) {
   if (!isEggType(type)) return false;
-  const info = eggCatalog[type];
   state.forcedEggType = type;
   if (state.mode === 'human' && state.egg && !state.egg.found) {
     state.egg.type = type;
     state.egg.name = eggQualityLabel(state.egg.quality);
-    state.egg.effect = info.effect;
     const gainedMaterials = state.daySummary?.gainedMaterials ?? 0;
     state.daySummary = createDaySummary(state, gainedMaterials);
   }
@@ -2751,7 +2757,6 @@ function createEgg(state: GameState): EggEntity {
   const metrics = eggMetrics(state);
   const outcome = evaluateEggQuality({
     nutrition: metrics.nutrition,
-    foodsEaten: state.foraging.foodsEatenToday,
     dryRest: state.dryRestTonight,
   });
   return createMorningEggForDay(
@@ -2770,7 +2775,6 @@ function createMorningEggForDay(
   quality: EggQuality = 'poor',
   budget = 2,
 ): EggEntity {
-  const eggInfo = eggCatalog[type];
   const spot = selectEggSpot(
     eggDay,
     state.previousEggSpotId,
@@ -2782,7 +2786,6 @@ function createMorningEggForDay(
     type,
     found: false,
     name: eggQualityLabel(quality),
-    effect: eggInfo.effect,
     quality,
     budget,
   };
@@ -2957,7 +2960,6 @@ function formatRequirementGap(value: number) {
 }
 
 function applyEggEffect(state: GameState, type: EggType) {
-  const info = eggCatalog[type];
   if (type === 'fullBelly') state.stats.maxStamina += 10;
   if (type === 'greenLeaf') {
     state.stats.courage += 2;
@@ -2980,14 +2982,9 @@ function applyEggEffect(state: GameState, type: EggType) {
     state.stats.dig += 1;
   }
   if (type === 'cracked') state.stats.courage = Math.max(1, state.stats.courage - 1);
-
-  if (!state.upgrades.includes(info.upgrade)) {
-    state.upgrades.push(info.upgrade);
-  }
 }
 
 function rememberEgg(state: GameState, type: EggType, quality: EggQuality) {
-  const info = eggCatalog[type];
   const name = eggQualityLabel(quality);
   const existing = state.eggArchive.find((entry) => entry.quality === quality);
   if (existing) {
@@ -2998,9 +2995,8 @@ function rememberEgg(state: GameState, type: EggType, quality: EggQuality) {
   state.eggArchive.push({
     type,
     name,
-    effect: info.effect,
-    upgrade: info.upgrade,
     quality,
+    budget: EGG_BUDGET[quality],
     count: 1,
   });
 }
@@ -3085,49 +3081,6 @@ function addUpgrade(state: GameState, upgrade: string) {
   }
 }
 
-const eggCatalog: Record<EggType, { name: string; effect: string; upgrade: string }> = {
-  fullBelly: {
-    name: '普通蛋',
-    effect: '鸡的冲刺上限提升，逃跑和刨坑更有余量。',
-    upgrade: '冲刺壳',
-  },
-  greenLeaf: {
-    name: '普通蛋',
-    effect: '胆量提升；嫩草需要清晨训练解锁。',
-    upgrade: '青叶胆',
-  },
-  swift: {
-    name: '普通蛋',
-    effect: '移动速度提升；蚯蚓需要清晨训练解锁。',
-    upgrade: '快脚爪',
-  },
-  lantern: {
-    name: '普通蛋',
-    effect: '房子和鸡笼的灯更暖；夜虫需要清晨训练解锁。',
-    upgrade: '暖灯',
-  },
-  brave: {
-    name: '普通蛋',
-    effect: '经历黑夜后胆量提升，高夜压时更不容易乱。',
-    upgrade: '铁胆',
-  },
-  sunny: {
-    name: '普通蛋',
-    effect: '鸡更会啄硬壳食物，冲刺上限也小幅提升。',
-    upgrade: '会追人',
-  },
-  balanced: {
-    name: '普通蛋',
-    effect: '啄食和挖坑能力一起提升。',
-    upgrade: '会过日子',
-  },
-  cracked: {
-    name: '差蛋',
-    effect: '今天太惊险，鸡需要缓一缓。',
-    upgrade: '惊魂未定',
-  },
-};
-
 function storyPhaseLabel(phase: StoryPhase) {
   if (phase === 'morning-human') return '清晨找蛋';
   if (phase === 'chicken-day') return '白天';
@@ -3193,7 +3146,7 @@ function nutritionFor(food: FoodEntity) {
   const type = food.type;
   if (type === 'grain' && food.fromKeeper) return scaledNutritionGain(PREMIUM_FEED_NUTRITION_GAIN);
   if (type === 'grain') return scaledNutritionGain(3);
-  if (type === 'grass') return scaledNutritionGain(2);
+  if (type === 'grass') return scaledNutritionGain(3);
   if (type === 'bug' || type === 'worm') return scaledNutritionGain(5);
   if (type === 'cricket') return scaledNutritionGain(7);
   if (type === 'beetle') return scaledNutritionGain(10);
@@ -3208,7 +3161,7 @@ function scaledNutritionGain(gain: number) {
 }
 
 function foodDiscoveryEffect(type: ForagingFoodType, restored: number) {
-  if (type === 'cricket') return `冲刺劲 +${restored}，野味会提高蛋的记忆。`;
+  if (type === 'cricket') return `冲刺劲 +${restored}，更会追着活食跑了。`;
   if (type === 'beetle') return `冲刺劲 +${restored}，很顶饱，蛋品质更容易变好。`;
   if (type === 'nightBug') return `冲刺劲 +${restored}，可能留下夜食蛋记忆。`;
   if (type === 'sunflower') return `冲刺劲 +${restored}，这是人给的特别好吃。`;
