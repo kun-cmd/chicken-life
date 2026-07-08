@@ -58,12 +58,12 @@ test('keeper waits before entering for daytime feeding', () => {
   assert.equal(state.foods.some((food) => food.type === 'sunflower'), false);
 });
 
-test('keeper daytime sunflower feeding stays limited', () => {
+test('keeper daytime sunflower feeding allows five seeds then returns', () => {
   const state = createGameState();
   state.mode = 'chicken';
   state.phase = 'day';
   state.time = 0.3;
-  state.eaten.sunflower = 3;
+  state.eaten.sunflower = 5;
   state.keeper = {
     ...state.keeper,
     active: true,
@@ -79,6 +79,27 @@ test('keeper daytime sunflower feeding stays limited', () => {
   assert.equal(updateKeeper(state, 0, 1), null);
   assert.equal(state.keeper.returning, true);
   assert.equal(state.foods.some((food) => food.type === 'sunflower'), false);
+});
+
+test('keeper daytime route stays on paved paths', () => {
+  for (const point of KEEPER_ROUTE) {
+    assert.equal(isOnPath(point), true);
+  }
+
+  for (let index = 1; index < KEEPER_ROUTE.length; index += 1) {
+    const from = KEEPER_ROUTE[index - 1];
+    const to = KEEPER_ROUTE[index];
+    for (let step = 0; step <= 8; step += 1) {
+      const ratio = step / 8;
+      assert.equal(
+        isOnPath({
+          x: from.x + (to.x - from.x) * ratio,
+          y: from.y + (to.y - from.y) * ratio,
+        }),
+        true,
+      );
+    }
+  }
 });
 
 test('non-keeper food starts on mud spots', () => {

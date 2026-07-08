@@ -420,7 +420,7 @@ const KEEPER_RESCUE_AFFECTION = 60;
 const KEEPER_SWIFT_RESCUE_AFFECTION = 85;
 const KEEPER_VISIT_DELAY_MIN = 18;
 const KEEPER_VISIT_DELAY_RANDOM = 36;
-const KEEPER_SUNFLOWER_LIMIT = 3;
+const KEEPER_SUNFLOWER_LIMIT = 5;
 export const CORE_LOOP_TUNING = {
   predatorContactPressure: 34,
   porchLightReliefMin: 5,
