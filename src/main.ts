@@ -94,6 +94,7 @@ const hud = {
   debugSetDay: document.querySelector<HTMLButtonElement>('#debugSetDay')!,
   debugAffection: document.querySelector<HTMLInputElement>('#debugAffection')!,
   debugAffectionLabel: document.querySelector<HTMLElement>('#debugAffectionLabel')!,
+  debugFamiliarity: document.querySelector<HTMLElement>('#debugFamiliarity')!,
   masterVolume: document.querySelector<HTMLInputElement>('#masterVolume')!,
   masterVolumeLabel: document.querySelector<HTMLElement>('#masterVolumeLabel')!,
 };
@@ -112,6 +113,15 @@ const touchLabels: Record<TouchOption, string> = {
   head: '摸摸头',
   back: '顺顺背',
   hold: '轻轻抱起',
+};
+
+const yardRegionLabels: Record<string, string> = {
+  'house-yard': '屋边',
+  'main-path': '主路',
+  'pond-bank': '池塘边',
+  'tree-shade': '树荫',
+  'coop-yard': '鸡舍边',
+  'outer-growth': '外围草丛',
 };
 
 appRoot.tabIndex = 0;
@@ -181,6 +191,7 @@ function renderHud(snapshot: HudSnapshot) {
     hud.debugAffection.value = String(snapshot.affection);
   }
   hud.debugAffectionLabel.textContent = String(snapshot.affection);
+  renderDebugFamiliarity(snapshot);
   if (yardPanelOpen) renderYardPanel(snapshot);
   renderEnding(snapshot);
 
@@ -208,6 +219,27 @@ function renderHud(snapshot: HudSnapshot) {
       hud.rewardPanel.hidden = true;
     }, 3600);
   }
+}
+
+function renderDebugFamiliarity(snapshot: HudSnapshot) {
+  hud.debugFamiliarity.replaceChildren();
+
+  const title = document.createElement('strong');
+  title.textContent = '区域熟悉度';
+  hud.debugFamiliarity.append(title);
+
+  const list = document.createElement('dl');
+  for (const [region, entry] of Object.entries(snapshot.yardFamiliarity.regions)) {
+    const label = document.createElement('dt');
+    label.textContent = yardRegionLabels[region] ?? region;
+
+    const value = document.createElement('dd');
+    const firstSeen = entry.firstSeenDay > 0 ? ` 第${entry.firstSeenDay}天初访` : ' 未初访';
+    value.textContent = `${Math.round(entry.familiarity)} / 100 ·${firstSeen}`;
+
+    list.append(label, value);
+  }
+  hud.debugFamiliarity.append(list);
 }
 
 function eggPressureText(snapshot: HudSnapshot) {

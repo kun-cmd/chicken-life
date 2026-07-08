@@ -383,6 +383,7 @@ export interface HudSnapshot {
   upgrades: string[];
   eggArchive: EggArchiveEntry[];
   yard: YardUpgradeState;
+  yardFamiliarity: YardFamiliarityState;
   currentEggQuality: EggQuality | null;
   currentEggBudget: number;
   projectedEggQuality: EggQuality;
@@ -1865,6 +1866,14 @@ export function buildHudSnapshot(state: GameState, consumeTransient = true): Hud
       wood: state.yard.wood,
       pendingWood: state.yard.pendingWood,
       owned: [...state.yard.owned],
+    },
+    yardFamiliarity: {
+      regions: Object.fromEntries(
+        Object.entries(state.yardFamiliarity.regions).map(([region, entry]) => [
+          region,
+          { ...entry },
+        ]),
+      ) as YardFamiliarityState['regions'],
     },
     currentEggQuality: state.egg?.quality ?? null,
     currentEggBudget: state.egg?.budget ?? 0,
