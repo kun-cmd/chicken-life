@@ -11,7 +11,7 @@ export interface AbilityTutorial {
 export const ABILITY_TUTORIALS: AbilityTutorial[] = [
   {
     ability: 'scratch',
-    day: 4,
+    day: 3,
     position: { x: 610, y: 565 },
     prompt: '松土下面有细响。靠近后按住 E 刨开泥土。',
   },

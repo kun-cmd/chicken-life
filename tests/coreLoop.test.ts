@@ -9,6 +9,8 @@ import {
   EGG_BUDGET,
   evaluateEggQuality,
 } from '../src/game/systems/eggEconomy';
+import { pendingAwakening } from '../src/game/systems/abilities';
+import { tutorialForDay } from '../src/game/content/abilityTutorials';
 import {
   CORE_LOOP_TUNING,
   applyFlowEvent,
@@ -18,6 +20,7 @@ import {
   eatFood,
   restInHole,
   servePremiumFeed,
+  startNextDay,
   updateNightPressure,
 } from '../src/game/simulation/state';
 import { YARD_LAMP_POSITION } from '../src/game/content/yardUpgrades';
@@ -126,6 +129,13 @@ test('premium feed pieces visibly count as richer grain nutrition', () => {
   assert.equal(state.nutrition, 72);
 });
 
+test('scratch becomes the day three territory skill', () => {
+  const state = createGameState();
+  assert.equal(pendingAwakening(2, state.profile), null);
+  assert.equal(pendingAwakening(3, state.profile), 'scratch');
+  assert.equal(tutorialForDay(3, state.profile.awakenedAbilities)?.ability, 'scratch');
+});
+
 test('night pressure covers egg nutrition and does not rise just because time passes', () => {
   const state = createGameState();
   state.nutrition = 90;
@@ -197,6 +207,25 @@ test('scratching the same place deepens a remembered cooling hole', () => {
   assert.equal(state.holes.length, 1);
 });
 
+test('ordinary holes expire sooner while deep territory holes remain remembered', () => {
+  const shallow = createGameState();
+  shallow.weather = 'sunny';
+  const shallowHole = digHole(shallow, { x: 320, y: 520 });
+  assert.ok(shallowHole);
+  advanceMornings(shallow, 3);
+  assert.equal(shallow.holes.some((hole) => hole.id === shallowHole.id), false);
+
+  const deep = createGameState();
+  deep.weather = 'sunny';
+  const deepHole = digHole(deep, { x: 430, y: 720 });
+  assert.ok(deepHole);
+  deep.holesDugToday = 0;
+  const sameHole = digHole(deep, { x: 438, y: 724 });
+  assert.equal(sameHole?.id, deepHole.id);
+  advanceMornings(deep, 3);
+  assert.equal(deep.holes.some((hole) => hole.id === deepHole.id), true);
+});
+
 test('holes cool the same at night as they do in the day', () => {
   const makeRestingState = (night: boolean) => {
     const state = createGameState();
@@ -218,6 +247,18 @@ test('holes cool the same at night as they do in the day', () => {
 
   assert.equal(nightHeat, dayHeat);
 });
+
+function advanceMornings(state: ReturnType<typeof createGameState>, mornings: number) {
+  for (let index = 0; index < mornings; index += 1) {
+    if (state.flow.phase === 'morning-human') {
+      applyFlowEvent(state, { type: 'egg-found' });
+      applyFlowEvent(state, { type: 'return-home' });
+    }
+    applyFlowEvent(state, { type: 'tick', amount: 1 });
+    applyFlowEvent(state, { type: 'settle-for-night' });
+    startNextDay(state);
+  }
+}
 
 test('ordinary holes cool quickly while deep holes cool faster', () => {
   const restHeat = (depth: number) => {

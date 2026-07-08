@@ -433,7 +433,7 @@ const RESTOCK_FOOD_COUNT = 3;
 const RAIN_MUD_SECONDS = 4;
 const HOLE_REUSE_RADIUS = 62;
 const HOLE_MAX_DEPTH = 6;
-const HOLE_KEEP_DAYS = 3;
+const HOLE_KEEP_DAYS = 2;
 const TERRITORY_KEEP_DAYS = 8;
 const MAX_REMEMBERED_HOLES = 5;
 
@@ -1796,7 +1796,7 @@ export function startNextDay(state: GameState) {
   state.activeAbilityTutorial = null;
   state.eaten = freshEaten();
   state.foods = [];
-  state.holes = state.holes.filter((hole) => state.day - hole.dugDay <= 1).slice(-4);
+  state.holes = ageHolesForMorning(state);
   state.egg = null;
   state.daySummary = null;
   state.animals = [];

@@ -1,7 +1,7 @@
 import type { AbilityId, ChickenProfile } from '../profile/chickenProfile';
 
 const AWAKENING_DAY: Partial<Record<AbilityId, number>> = {
-  scratch: 4,
+  scratch: 3,
   sprint: 5,
   flutter: 7,
 };
