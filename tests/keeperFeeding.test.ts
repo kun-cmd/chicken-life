@@ -5,6 +5,7 @@ import {
   createGameState,
   expireFoods,
   isGoodFoodSpot,
+  peckFood,
   updateKeeper,
   visibleFoods,
 } from '../src/game/simulation/state';
@@ -182,6 +183,39 @@ test('legacy keeper sunflower seeds with only freshUntil also expire visually', 
   assert.equal(visibleFoods(state).some((food) => food.id === seed.id), false);
   assert.deepEqual(expireFoods(state).expiredIds, [seed.id]);
   assert.equal(state.foods.some((food) => food.id === seed.id), false);
+});
+
+test('keeper sunflower seeds can be finished after the keeper walks away', () => {
+  const state = createGameState();
+  state.mode = 'chicken';
+  state.phase = 'day';
+  state.time = 0.3;
+  const seed = {
+    id: 901,
+    x: 420,
+    y: 520,
+    type: 'sunflower' as const,
+    visibleAt: 0.3,
+    expiresAt: 0.54,
+    freshUntil: 0.54,
+    progress: 0,
+    hardness: 2,
+    fromKeeper: true,
+  };
+  state.chicken = { x: seed.x, y: seed.y };
+  state.keeper = {
+    ...state.keeper,
+    active: false,
+    x: 80,
+    y: 80,
+  };
+  state.foods = [seed];
+
+  assert.equal(peckFood(state, seed), 'pecked');
+  assert.equal(seed.progress, 1);
+  assert.equal(peckFood(state, seed), 'eaten');
+  assert.equal(state.foods.some((food) => food.id === seed.id), false);
+  assert.equal(state.eaten.sunflower, 1);
 });
 
 test('expired keeper sunflower seeds do not count against the daily feed limit', () => {

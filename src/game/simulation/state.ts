@@ -1119,12 +1119,6 @@ export function peckFood(state: GameState, food: FoodEntity) {
     return 'eaten' as const;
   }
 
-  const nearKeeper = state.keeper.active && distance(state.chicken, state.keeper) < 185;
-  if (!nearKeeper) {
-    state.message = '人刚撒下瓜子，跟近一点就能啄到。';
-    return 'missed' as const;
-  }
-
   const hardness = food.hardness ?? 2;
   food.progress = (food.progress ?? 0) + 1;
   if (food.progress < hardness) {
@@ -3190,7 +3184,7 @@ function foodUnlockHint(type: FoodType) {
   if (type === 'grass') return '鸡还不会分辨嫩草，先把米粒吃够，清晨在窝边训练后再来。';
   if (type === 'bug') return '鸡还不敢啄蚯蚓，先把嫩草吃够，清晨训练翻土后再来。';
   if (type === 'nightBug') return '夜虫太怪了，先把蚯蚓吃够，清晨训练出灯和胆量之后再吃。';
-  if (type === 'sunflower') return '瓜子要跟着养鸡人的手边啄，而且要啄两下。';
+  if (type === 'sunflower') return '瓜子要靠近后啄两下。';
   if (type === 'meat') return '肉要啄松了才能吃。';
   return '这口还没学会怎么吃。';
 }
