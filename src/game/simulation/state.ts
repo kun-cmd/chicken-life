@@ -1086,7 +1086,7 @@ function keeperSunflowerCount(state: GameState) {
       (food) =>
         food.type === 'sunflower' &&
         food.fromKeeper &&
-        (food.expiresAt === undefined || state.time <= food.expiresAt),
+        !isFoodExpired(state, food),
     ).length
   );
 }
@@ -1140,13 +1140,22 @@ export function expireFoods(state: GameState) {
   const expiredIds: number[] = [];
   const spawnedFoods: FoodEntity[] = [];
   state.foods = state.foods.filter((food) => {
-    const expired = food.expiresAt !== undefined && state.time > food.expiresAt;
+    const expired = isFoodExpired(state, food);
     if (expired) {
       expiredIds.push(food.id);
     }
     return !expired;
   });
   return { expiredIds, spawnedFoods };
+}
+
+function foodExpiryAt(food: FoodEntity) {
+  return food.expiresAt ?? food.freshUntil;
+}
+
+function isFoodExpired(state: GameState, food: FoodEntity) {
+  const expiresAt = foodExpiryAt(food);
+  return expiresAt !== undefined && state.time > expiresAt;
 }
 
 export function updateWeatherExposure(state: GameState, dt: number) {
@@ -2457,7 +2466,7 @@ export function visibleFoods(state: GameState) {
   return state.foods.filter(
     (food) =>
       state.time >= food.visibleAt &&
-      (food.expiresAt === undefined || state.time <= food.expiresAt),
+      !isFoodExpired(state, food),
   );
 }
 

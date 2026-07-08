@@ -165,6 +165,25 @@ test('expired keeper sunflower seeds are removed from the yard', () => {
   assert.equal(state.foods.some((food) => food.id === seed.id), false);
 });
 
+test('legacy keeper sunflower seeds with only freshUntil also expire visually', () => {
+  const state = createGameState();
+  state.time = 0.5;
+  const seed = {
+    id: 900,
+    x: KEEPER_ROUTE[1].x,
+    y: KEEPER_ROUTE[1].y,
+    type: 'sunflower' as const,
+    visibleAt: 0.2,
+    freshUntil: 0.4,
+    fromKeeper: true,
+  };
+  state.foods = [seed];
+
+  assert.equal(visibleFoods(state).some((food) => food.id === seed.id), false);
+  assert.deepEqual(expireFoods(state).expiredIds, [seed.id]);
+  assert.equal(state.foods.some((food) => food.id === seed.id), false);
+});
+
 test('expired keeper sunflower seeds do not count against the daily feed limit', () => {
   const state = createGameState();
   state.mode = 'chicken';
