@@ -6,6 +6,7 @@ import {
   expireFoods,
   isGoodFoodSpot,
   updateKeeper,
+  visibleFoods,
 } from '../src/game/simulation/state';
 
 test('keeper sunflower seeds fall at the keeper position even on paths', () => {
@@ -34,6 +35,10 @@ test('keeper sunflower seeds fall at the keeper position even on paths', () => {
   assert.equal(seed.type, 'sunflower');
   assert.equal(seed.fromKeeper, true);
   assert.deepEqual({ x: seed.x, y: seed.y }, pathPoint);
+  assert.ok(seed.freshUntil !== undefined);
+  assert.ok(seed.expiresAt !== undefined);
+  assert.ok(seed.freshUntil - state.time >= 0.22);
+  assert.equal(seed.expiresAt, seed.freshUntil);
 });
 
 test('keeper waits before entering for daytime feeding', () => {
@@ -153,10 +158,45 @@ test('expired keeper sunflower seeds are removed from the yard', () => {
   const seed = updateKeeper(state, 0, 0.1);
   assert.ok(seed);
   state.time = seed.freshUntil! + 0.01;
+  assert.equal(visibleFoods(state).some((food) => food.id === seed.id), false);
 
   const expired = expireFoods(state);
   assert.deepEqual(expired.expiredIds, [seed.id]);
   assert.equal(state.foods.some((food) => food.id === seed.id), false);
+});
+
+test('expired keeper sunflower seeds do not count against the daily feed limit', () => {
+  const state = createGameState();
+  state.mode = 'chicken';
+  state.phase = 'day';
+  state.time = 0.4;
+  state.keeper = {
+    ...state.keeper,
+    active: true,
+    returning: false,
+    doneFeeding: false,
+    rescuing: false,
+    routeIndex: 1,
+    scatterCooldown: 0,
+    x: KEEPER_ROUTE[1].x,
+    y: KEEPER_ROUTE[1].y,
+  };
+  state.foods = Array.from({ length: 5 }, (_, index) => ({
+    id: index + 100,
+    x: KEEPER_ROUTE[1].x,
+    y: KEEPER_ROUTE[1].y,
+    type: 'sunflower' as const,
+    visibleAt: 0.1,
+    expiresAt: 0.2,
+    freshUntil: 0.2,
+    fromKeeper: true,
+  }));
+
+  const seed = updateKeeper(state, 0, 0.1);
+
+  assert.ok(seed);
+  assert.equal(seed.type, 'sunflower');
+  assert.equal(state.keeper.returning, false);
 });
 
 test('non-keeper food starts on mud spots', () => {

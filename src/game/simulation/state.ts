@@ -423,6 +423,7 @@ const KEEPER_VISIT_DELAY_RANDOM = 36;
 const KEEPER_SUNFLOWER_LIMIT = 5;
 const KEEPER_SUNFLOWER_INTERVAL_MIN = 4;
 const KEEPER_SUNFLOWER_INTERVAL_RANDOM = 1.2;
+const KEEPER_SUNFLOWER_FRESH_DURATION = 0.24;
 export const CORE_LOOP_TUNING = {
   predatorContactPressure: 34,
   porchLightReliefMin: 5,
@@ -1081,7 +1082,12 @@ export function updateKeeper(state: GameState, moveDt: number, clockDt = moveDt)
 function keeperSunflowerCount(state: GameState) {
   return (
     state.eaten.sunflower +
-    state.foods.filter((food) => food.type === 'sunflower' && food.fromKeeper).length
+    state.foods.filter(
+      (food) =>
+        food.type === 'sunflower' &&
+        food.fromKeeper &&
+        (food.expiresAt === undefined || state.time <= food.expiresAt),
+    ).length
   );
 }
 
@@ -1113,11 +1119,6 @@ export function peckFood(state: GameState, food: FoodEntity) {
     return 'eaten' as const;
   }
 
-  if (food.freshUntil && state.time > food.freshUntil) {
-    state.message = '瓜子滚进泥里了，下一粒再跟上。';
-    return 'missed' as const;
-  }
-
   const nearKeeper = state.keeper.active && distance(state.chicken, state.keeper) < 185;
   if (!nearKeeper) {
     state.message = '人刚撒下瓜子，跟近一点就能啄到。';
@@ -1139,12 +1140,7 @@ export function expireFoods(state: GameState) {
   const expiredIds: number[] = [];
   const spawnedFoods: FoodEntity[] = [];
   state.foods = state.foods.filter((food) => {
-    const expiredSeed = food.type === 'sunflower' && food.freshUntil !== undefined && state.time > food.freshUntil;
-    const expiredWorm =
-      (food.type === 'bug' || food.type === 'worm') &&
-      food.expiresAt !== undefined &&
-      state.time > food.expiresAt;
-    const expired = expiredSeed || expiredWorm;
+    const expired = food.expiresAt !== undefined && state.time > food.expiresAt;
     if (expired) {
       expiredIds.push(food.id);
     }
@@ -2458,7 +2454,11 @@ function lightPressureRateFor(lamp: number) {
 }
 
 export function visibleFoods(state: GameState) {
-  return state.foods.filter((food) => state.time >= food.visibleAt);
+  return state.foods.filter(
+    (food) =>
+      state.time >= food.visibleAt &&
+      (food.expiresAt === undefined || state.time <= food.expiresAt),
+  );
 }
 
 export function refillForagingFoods(state: GameState, offscreenMudPoints: readonly Vec2[]) {
@@ -2620,6 +2620,7 @@ function pickSparrowTarget(state: GameState) {
 }
 
 function scatterSunflowerSeed(state: GameState) {
+  const expiresAt = clamp01(state.time + KEEPER_SUNFLOWER_FRESH_DURATION);
   const seed: FoodEntity = {
     id: state.nextId++,
     x: clamp(state.keeper.x, 58, WORLD_WIDTH - 58),
@@ -2628,7 +2629,8 @@ function scatterSunflowerSeed(state: GameState) {
     visibleAt: state.time,
     progress: 0,
     hardness: 2,
-    freshUntil: clamp01(state.time + 0.11),
+    expiresAt,
+    freshUntil: expiresAt,
     fromKeeper: true,
   };
   state.foods.push(seed);
