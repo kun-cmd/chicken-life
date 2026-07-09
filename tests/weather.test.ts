@@ -38,7 +38,7 @@ test('four continuous rainy seconds off path records muddy life', () => {
   assert.equal(state.muddyToday, true);
 
   state.offPathRainSeconds = 2;
-  state.chicken = { x: 700, y: 500 };
+  state.chicken = { x: 700, y: 720 };
   updateWeatherExposure(state, 1);
   assert.equal(state.offPathRainSeconds, 0);
 });

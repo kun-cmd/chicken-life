@@ -18,9 +18,11 @@ import {
   createGameState,
   digHole,
   eatFood,
+  recordHumanLureSunflower,
   restInHole,
   servePremiumFeed,
   startNextDay,
+  updateIdleChickenWander,
   updateNightPressure,
 } from '../src/game/simulation/state';
 import { YARD_LAMP_POSITION } from '../src/game/content/yardUpgrades';
@@ -67,6 +69,29 @@ test('sprinting heats the chicken while shade and water cool it', () => {
   assert.ok(hot - walking > 9);
   assert.ok(cooled < hot);
   assert.equal(sprintScaleForHeat(BODY_COMFORT_TUNING.maxHeat), BODY_COMFORT_TUNING.minimumSprintScale);
+});
+
+test('tree shade cools faster than ordinary shade without changing the base shade rate', () => {
+  const ordinaryShade = advanceHeat(50, 1, {
+    sprinting: false,
+    moving: true,
+    inShade: true,
+    drinking: false,
+    raining: false,
+    night: false,
+  });
+  const treeShade = advanceHeat(50, 1, {
+    sprinting: false,
+    moving: true,
+    inShade: true,
+    treeShadeCooling: true,
+    drinking: false,
+    raining: false,
+    night: false,
+  });
+
+  assert.ok(treeShade < ordinaryShade);
+  assert.ok(50 - treeShade > (50 - ordinaryShade) * 2);
 });
 
 test('egg quality follows nutrition tiers and wet downgrade', () => {
@@ -307,4 +332,33 @@ test('grass now matches grain nutrition', () => {
   eatFood(state, food);
 
   assert.equal(state.nutrition, 3);
+});
+
+test('five sunflower treats make the chicken follow the human briefly', () => {
+  const state = createGameState();
+  state.mode = 'human';
+  state.phase = 'human';
+  state.human = { x: 420, y: 420 };
+  state.chicken = { x: 540, y: 448 };
+
+  for (let index = 0; index < 4; index += 1) {
+    assert.equal(recordHumanLureSunflower(state), false);
+  }
+  assert.equal(recordHumanLureSunflower(state), true);
+
+  const beforeDistance = Math.hypot(state.chicken.x - state.human.x, state.chicken.y - state.human.y);
+  state.human = { x: 500, y: 470 };
+  updateIdleChickenWander(state, 1);
+  const afterDistance = Math.hypot(state.chicken.x - state.human.x, state.chicken.y - state.human.y);
+
+  assert.ok(state.chickenWander.followSeconds > 8.9);
+  assert.ok(afterDistance < beforeDistance);
+  assert.ok(afterDistance > 20);
+
+  for (let index = 0; index < 12; index += 1) {
+    updateIdleChickenWander(state, 1);
+  }
+
+  assert.equal(state.chickenWander.followSeconds, 0);
+  assert.equal(state.chickenWander.followOffset, null);
 });

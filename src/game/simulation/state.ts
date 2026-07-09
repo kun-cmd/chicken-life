@@ -13,10 +13,10 @@ import {
   isBlocked,
   isInCoop,
   isInLowerLeftShade,
-  isInPlantPatch,
   isOnPath,
+  LOWER_LEFT_SHADE_TREE,
 } from '../content/yard';
-import { EGG_SPOTS, selectEggSpot } from '../content/eggSpots';
+import { EGG_SPOTS, selectEggSpot, type EggSpot } from '../content/eggSpots';
 import {
   PREMIUM_FEED_POSITION,
   WATER_BASIN_POSITION,
@@ -162,6 +162,7 @@ export interface FoodEntity extends Vec2 {
   hardness?: number;
   freshUntil?: number;
   fromKeeper?: boolean;
+  fromHuman?: boolean;
   velocity?: Vec2;
   buried?: boolean;
 }
@@ -245,6 +246,9 @@ export interface ChickenWanderState {
   wait: number;
   pause: number;
   facing: number;
+  followSeconds: number;
+  followOffset: Vec2 | null;
+  lureSunflowerStreak: number;
 }
 
 export interface GameState {
@@ -325,6 +329,7 @@ export interface GameState {
   message: string;
   reward: { title: string; name: string; effect: string } | null;
   nextId: number;
+  yardMapRevision: number;
 }
 
 export interface PressureContext {
@@ -422,6 +427,8 @@ const KEEPER_SUNFLOWER_LIMIT = 5;
 const KEEPER_SUNFLOWER_INTERVAL_MIN = 4;
 const KEEPER_SUNFLOWER_INTERVAL_RANDOM = 1.2;
 const KEEPER_SUNFLOWER_FRESH_DURATION = 0.24;
+const CURRENT_YARD_MAP_REVISION = 2;
+const YARD_MAP_REVISION_2_OFFSET_Y = 220;
 export const CORE_LOOP_TUNING = {
   predatorContactPressure: 34,
   porchLightReliefMin: 5,
@@ -441,6 +448,9 @@ const HOLE_MAX_DEPTH = 6;
 const HOLE_KEEP_DAYS = 2;
 const TERRITORY_KEEP_DAYS = 8;
 const MAX_REMEMBERED_HOLES = 5;
+const HUMAN_LURE_FOLLOW_SECONDS = 10;
+const HUMAN_LURE_FOLLOW_MIN_RADIUS = 48;
+const HUMAN_LURE_FOLLOW_MAX_RADIUS = 76;
 
 function createTutorialEgg(): EggEntity {
   return {
@@ -502,12 +512,15 @@ export function createGameState(): GameState {
     holesDugToday: 0,
     lightPressureUsed: freshLightPressureUsed(),
     chicken: { x: COOP_DOOR.x, y: COOP_DOOR.y + 32 },
-    human: { x: 760, y: 450 },
+    human: { x: 760, y: 670 },
     chickenWander: {
       target: null,
       wait: 0,
       pause: 0,
       facing: 1,
+      followSeconds: 0,
+      followOffset: null,
+      lureSunflowerStreak: 0,
     },
     keeper: {
       ...KEEPER_START,
@@ -549,7 +562,7 @@ export function createGameState(): GameState {
     catWillVisitToday: Math.random() < CAT_VISIT_CHANCE,
     weasel: {
       x: -120,
-      y: 820,
+      y: 1040,
       active: false,
       chasing: false,
       stunned: 0,
@@ -569,6 +582,7 @@ export function createGameState(): GameState {
     message: '清晨到了。鸡已经在院子里，先跟着它的叫声找蛋。',
     reward: null,
     nextId: 1,
+    yardMapRevision: CURRENT_YARD_MAP_REVISION,
   };
 
   spawnDailyFood(state);
@@ -1452,6 +1466,39 @@ export function updateIdleChickenWander(
 ) {
   if (state.mode !== 'human') return;
 
+  if (state.chickenWander.followSeconds > 0 && state.chickenWander.followOffset) {
+    state.chickenWander.followSeconds = Math.max(0, state.chickenWander.followSeconds - dt);
+    const target = {
+      x: clamp(state.human.x + state.chickenWander.followOffset.x, 58, WORLD_WIDTH - 58),
+      y: clamp(state.human.y + state.chickenWander.followOffset.y, 58, WORLD_HEIGHT - 58),
+    };
+    const vector = {
+      x: target.x - state.chicken.x,
+      y: target.y - state.chicken.y,
+    };
+    const length = Math.hypot(vector.x, vector.y);
+    if (length > 0.01) {
+      const speed = 54 + Math.min(state.affection, 80) * 0.24;
+      const step = Math.min(length, speed * dt);
+      const next = {
+        x: state.chicken.x + (vector.x / length) * step,
+        y: state.chicken.y + (vector.y / length) * step,
+      };
+      if (!isBlocked(next, 18)) {
+        state.chicken = next;
+      }
+      if (Math.abs(vector.x) > 2) state.chickenWander.facing = vector.x > 0 ? 1 : -1;
+    }
+    if (state.chickenWander.followSeconds <= 0) {
+      state.chickenWander.followSeconds = 0;
+      state.chickenWander.followOffset = null;
+      state.chickenWander.target = null;
+      state.chickenWander.wait = 0.35;
+      state.chickenWander.pause = 0;
+    }
+    return;
+  }
+
   const nearHuman = distance(state.human, state.chicken) < 92;
   if (keepDistanceFromHuman && nearHuman) {
     state.chickenWander.target = null;
@@ -1501,6 +1548,34 @@ export function updateIdleChickenWander(
 
   state.chicken = next;
   if (Math.abs(vector.x) > 2) state.chickenWander.facing = vector.x > 0 ? 1 : -1;
+}
+
+export function recordHumanLureSunflower(state: GameState) {
+  if (state.mode !== 'human') return false;
+  state.chickenWander.lureSunflowerStreak += 1;
+  if (state.chickenWander.lureSunflowerStreak < 5) return false;
+
+  const vector = {
+    x: state.chicken.x - state.human.x,
+    y: state.chicken.y - state.human.y,
+  };
+  const length = Math.hypot(vector.x, vector.y);
+  const radius = clamp(length || 58, HUMAN_LURE_FOLLOW_MIN_RADIUS, HUMAN_LURE_FOLLOW_MAX_RADIUS);
+  const followOffset =
+    length > 0.01
+      ? {
+          x: (vector.x / length) * radius,
+          y: (vector.y / length) * radius,
+        }
+      : { x: 56, y: 20 };
+
+  state.chickenWander.followSeconds = HUMAN_LURE_FOLLOW_SECONDS;
+  state.chickenWander.followOffset = followOffset;
+  state.chickenWander.lureSunflowerStreak = 0;
+  state.chickenWander.target = null;
+  state.chickenWander.wait = 0;
+  state.chickenWander.pause = 0;
+  return true;
 }
 
 function oldRepairCoop(state: GameState) {
@@ -1716,8 +1791,16 @@ function resetMorningState(state: GameState, nextMorningEgg: EggEntity | null) {
   state.muddyToday = false;
   state.lightPressureUsed = freshLightPressureUsed();
   state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 32 };
-  state.human = { x: 750, y: 448 };
-  state.chickenWander = { target: null, wait: 0.4, pause: 0.2, facing: 1 };
+  state.human = { x: 750, y: 668 };
+  state.chickenWander = {
+    target: null,
+    wait: 0.4,
+    pause: 0.2,
+    facing: 1,
+    followSeconds: 0,
+    followOffset: null,
+    lureSunflowerStreak: 0,
+  };
   state.keeper = {
     ...KEEPER_START,
     active: false,
@@ -1741,7 +1824,7 @@ function resetMorningState(state: GameState, nextMorningEgg: EggEntity | null) {
   state.animalCooldown = 5.8;
   state.catVisitedToday = false;
   state.catWillVisitToday = Math.random() < CAT_VISIT_CHANCE;
-  state.weasel = { x: -120, y: 820, active: false, chasing: false, stunned: 0 };
+  state.weasel = { x: -120, y: 1040, active: false, chasing: false, stunned: 0 };
   state.egg = nextMorningEgg;
   state.reward = null;
   spawnDailyFood(state);
@@ -1811,8 +1894,16 @@ export function startNextDay(state: GameState) {
   state.holesDugToday = 0;
   state.lightPressureUsed = freshLightPressureUsed();
   state.chicken = { x: COOP_DOOR.x, y: COOP_DOOR.y + 32 };
-  state.human = { x: 750, y: 448 };
-  state.chickenWander = { target: null, wait: 0, pause: 0, facing: 1 };
+  state.human = { x: 750, y: 668 };
+  state.chickenWander = {
+    target: null,
+    wait: 0,
+    pause: 0,
+    facing: 1,
+    followSeconds: 0,
+    followOffset: null,
+    lureSunflowerStreak: 0,
+  };
   state.keeper = {
     ...KEEPER_START,
     active: false,
@@ -1838,7 +1929,7 @@ export function startNextDay(state: GameState) {
   state.animalCooldown = 5.8;
   state.catVisitedToday = false;
   state.catWillVisitToday = Math.random() < CAT_VISIT_CHANCE;
-  state.weasel = { x: -120, y: 820, active: false, chasing: false, stunned: 0 };
+  state.weasel = { x: -120, y: 1040, active: false, chasing: false, stunned: 0 };
   state.weaselEncounter = null;
   state.weaselEncounterDoneToday = false;
   state.reward = null;
@@ -2198,7 +2289,12 @@ export function restoreGameState(saved: unknown): GameState {
     forcedEggType: isEggType(input.forcedEggType) ? input.forcedEggType : null,
     reward: null,
     message: input.message ?? fresh.message,
+    yardMapRevision: CURRENT_YARD_MAP_REVISION,
   };
+  if (needsLegacyYardMapShift(input)) {
+    shiftSavedYardPositions(restored, YARD_MAP_REVISION_2_OFFSET_Y);
+  }
+  restored.yardMapRevision = CURRENT_YARD_MAP_REVISION;
   if ((input.stats as Partial<ChickenStats> | undefined)?.speed === 142) {
     restored.stats.speed = BASE_CHICKEN_SPEED;
   }
@@ -2213,10 +2309,12 @@ export function restoreGameState(saved: unknown): GameState {
     restored.yard.wood = Number.isFinite(legacyWood) ? Math.max(0, Math.floor(legacyWood)) : 0;
   }
   if (input.egg && !input.eggSearch) {
+    const eggSpotCandidates = eggSpotsForState(restored);
     const spot = selectEggSpot(
       restored.day,
       restored.previousEggSpotId,
       createSeededRandom(restored.profile.runSeed + restored.day * 7919),
+      eggSpotCandidates,
     );
     restored.egg = { ...input.egg, ...spot.position };
     restored.eggSearch = {
@@ -2225,18 +2323,54 @@ export function restoreGameState(saved: unknown): GameState {
     };
   }
   if (restored.egg && !restored.egg.found) {
+    const eggSpotCandidates = eggSpotsForState(restored);
     const spot =
-      EGG_SPOTS.find((candidate) => candidate.id === restored.eggSearch.spotId) ??
+      eggSpotCandidates.find((candidate) => candidate.id === restored.eggSearch.spotId) ??
       selectEggSpot(
         restored.day,
         restored.previousEggSpotId,
         createSeededRandom(restored.profile.runSeed + restored.day * 7919),
+        eggSpotCandidates,
       );
     restored.egg = { ...restored.egg, ...spot.position };
     restored.eggSearch.spotId = spot.id;
   }
   syncLegacyPhaseFromFlow(restored);
   return restored;
+}
+
+function needsLegacyYardMapShift(input: Partial<GameState>) {
+  const revision = Number(input.yardMapRevision);
+  if (Number.isFinite(revision)) return revision < CURRENT_YARD_MAP_REVISION;
+  return Boolean(
+    input.chicken ||
+      input.human ||
+      input.keeper ||
+      input.weasel ||
+      input.foods ||
+      input.holes ||
+      input.egg ||
+      input.animals ||
+      input.weaselEncounter,
+  );
+}
+
+function shiftSavedYardPositions(state: GameState, dy: number) {
+  shiftSavedPoint(state.chicken, dy);
+  shiftSavedPoint(state.human, dy);
+  shiftSavedPoint(state.keeper, dy);
+  shiftSavedPoint(state.weasel, dy);
+  shiftSavedPoint(state.egg, dy);
+  for (const food of state.foods) shiftSavedPoint(food, dy);
+  for (const hole of state.holes) shiftSavedPoint(hole, dy);
+  for (const animal of state.animals) shiftSavedPoint(animal, dy);
+  shiftSavedPoint(state.weaselEncounter?.position, dy);
+  shiftSavedPoint(state.weaselEncounter?.target, dy);
+}
+
+function shiftSavedPoint(point: Vec2 | null | undefined, dy: number) {
+  if (!point || !Number.isFinite(point.y)) return;
+  point.y += dy;
 }
 
 function restoreEgg(
@@ -2426,7 +2560,10 @@ export function isGoodFoodSpot(point: Vec2) {
 }
 
 export function isShadowy(point: Vec2) {
-  return isInLowerLeftShade(point) || TREE_POSITIONS.some((tree) => distance(tree, point) < 98);
+  return (
+    isInLowerLeftShade(point) ||
+    TREE_POSITIONS.some((tree) => tree !== LOWER_LEFT_SHADE_TREE && distance(tree, point) < 98)
+  );
 }
 
 export function isNearLight(point: Vec2, lamp: number, yardLampActive = false) {
@@ -2760,10 +2897,12 @@ function createMorningEggForDay(
   quality: EggQuality = 'poor',
   budget = 2,
 ): EggEntity {
+  const eggSpotCandidates = eggSpotsForState(state);
   const spot = selectEggSpot(
     eggDay,
     state.previousEggSpotId,
     createSeededRandom(state.profile.runSeed + eggDay * 7919),
+    eggSpotCandidates,
   );
   state.eggSearch = createEggSearchState(spot.id);
   return {
@@ -2774,6 +2913,19 @@ function createMorningEggForDay(
     quality,
     budget,
   };
+}
+
+function eggSpotsForState(state: GameState): EggSpot[] {
+  return [
+    ...EGG_SPOTS,
+    ...state.holes.map((hole): EggSpot => ({
+      id: `hole-${hole.id}`,
+      position: { x: hole.x, y: hole.y },
+      cluePosition: { x: hole.x + 18, y: hole.y - 12 },
+      unlockDay: 1,
+      clueKind: 'scratched-soil',
+    })),
+  ];
 }
 
 function pickEggType(state: GameState): EggType {

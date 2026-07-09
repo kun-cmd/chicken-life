@@ -11,7 +11,7 @@ import {
 import { createSeededRandom } from '../src/game/systems/seededRandom';
 
 test('opens three, six, and ten egg spots by story chapter', () => {
-  assert.equal(PLANT_PATCHES.length, 5);
+  assert.equal(PLANT_PATCHES.length, 1);
   assert.equal(EGG_HIDE_AREAS.length, 10);
   assert.equal(EGG_SPOTS.length, 10);
   assert.equal(EGG_SPOTS.filter((spot) => spot.unlockDay <= 1).length, 3);
@@ -41,6 +41,20 @@ test('same seed produces the same spot sequence', () => {
   };
   assert.deepEqual(sequence(9), sequence(9));
   assert.notDeepEqual(sequence(9), sequence(10));
+});
+
+test('dynamic hole egg candidates can be selected but not repeated from yesterday', () => {
+  const holeSpot = {
+    id: 'hole-7',
+    position: { x: 260, y: 980 },
+    cluePosition: { x: 278, y: 968 },
+    unlockDay: 1 as const,
+    clueKind: 'scratched-soil' as const,
+  };
+  const spots = [EGG_SPOTS[0], holeSpot];
+
+  assert.equal(selectEggSpot(1, null, () => 0.99, spots).id, 'hole-7');
+  assert.equal(selectEggSpot(1, 'hole-7', () => 0.99, spots).id, EGG_SPOTS[0].id);
 });
 
 test('egg and clue positions are reachable', () => {

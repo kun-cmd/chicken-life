@@ -50,7 +50,7 @@ test('owned life facilities expose their world zones', () => {
   assert.equal(ownedFacilityAt(yard, { x: 610, y: 565 }), null);
   yard.owned.push('shade-shelter');
   assert.equal(ownedFacilityAt(yard, { x: 610, y: 565 }), null);
-  assert.equal(ownedFacilityAt(yard, { x: 930, y: 600 }), 'shade-shelter');
+  assert.equal(ownedFacilityAt(yard, { x: 930, y: 820 }), 'shade-shelter');
 });
 
 test('facility activity lasts four seconds and records progress once per day', () => {

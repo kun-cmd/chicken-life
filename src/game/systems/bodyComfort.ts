@@ -2,6 +2,7 @@ export interface HeatContext {
   sprinting: boolean;
   moving: boolean;
   inShade: boolean;
+  treeShadeCooling?: boolean;
   drinking: boolean;
   raining: boolean;
   night: boolean;
@@ -13,6 +14,7 @@ export const BODY_COMFORT_TUNING = {
   movingHeatPerActiveSecond: 1.2,
   sprintHeatPerActiveSecond: 10.5,
   shadeCoolingPerActiveSecond: 4.5,
+  treeShadeExtraCoolingPerActiveSecond: 5.8,
   rainCoolingPerActiveSecond: 2.4,
   waterCoolingPerActiveSecond: 24,
   passiveCoolingPerActiveSecond: 1.2,
@@ -30,6 +32,9 @@ export function advanceHeat(current: number, dt: number, context: HeatContext) {
   if (context.sprinting) gain += BODY_COMFORT_TUNING.sprintHeatPerActiveSecond;
   if (!context.moving) cooling += BODY_COMFORT_TUNING.passiveCoolingPerActiveSecond;
   if (context.inShade) cooling += BODY_COMFORT_TUNING.shadeCoolingPerActiveSecond;
+  if (context.treeShadeCooling) {
+    cooling += BODY_COMFORT_TUNING.treeShadeExtraCoolingPerActiveSecond;
+  }
   if (context.raining) cooling += BODY_COMFORT_TUNING.rainCoolingPerActiveSecond;
   if (context.drinking) cooling += BODY_COMFORT_TUNING.waterCoolingPerActiveSecond;
 

@@ -18,10 +18,10 @@ export interface YardUpgradeDefinition {
   effect: string;
 }
 
-export const YARD_LAMP_POSITION: Vec2 = { x: 930, y: 430 };
-export const WATER_BASIN_POSITION: Vec2 = { x: 875, y: 520 };
-export const PREMIUM_FEED_POSITION: Vec2 = { x: 620, y: 390 };
-export const COOP_ROOF_POSITION: Vec2 = { x: 1128, y: 282 };
+export const YARD_LAMP_POSITION: Vec2 = { x: 930, y: 650 };
+export const WATER_BASIN_POSITION: Vec2 = { x: 875, y: 740 };
+export const PREMIUM_FEED_POSITION: Vec2 = { x: 620, y: 610 };
+export const COOP_ROOF_POSITION: Vec2 = { x: 1128, y: 502 };
 
 export const YARD_UPGRADES: YardUpgradeDefinition[] = [
   {
@@ -49,7 +49,7 @@ export const YARD_UPGRADES: YardUpgradeDefinition[] = [
     id: 'shade-shelter',
     name: '遮阴布',
     cost: 4,
-    position: { x: 930, y: 600 },
+    position: { x: 930, y: 820 },
     effect: '形成稳定阴影，让鸡乘凉、打盹和梳理羽毛',
   },
   {
@@ -63,7 +63,7 @@ export const YARD_UPGRADES: YardUpgradeDefinition[] = [
     id: 'low-perch',
     name: '木箱瞭望台',
     cost: 6,
-    position: { x: 340, y: 690 },
+    position: { x: 340, y: 910 },
     effect: '增加跳跃路线，让鸡从高处观察远方',
   },
 ];

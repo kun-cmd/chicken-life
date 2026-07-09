@@ -22,6 +22,7 @@ import {
   distance,
   isBlocked,
   isInCoop,
+  isInLowerLeftShade,
   isOnPath,
 } from '../../game/content/yard';
 import { tutorialForAbility } from '../../game/content/abilityTutorials';
@@ -38,7 +39,12 @@ import {
 import { canUseAbility } from '../../game/systems/abilities';
 import { DAY_ACTIVE_SECONDS, DUSK_AT, NIGHT_AT } from '../../game/systems/dayFlow';
 import {
+  LURE_SEED_MOVE_SPEED,
+  advanceDuskCollection,
   createDuskCollectionState,
+  eatLureSeed,
+  findLureSeedTarget,
+  placeLureSeed,
   visionRadiusFor,
 } from '../../game/systems/duskCollection';
 import {
@@ -68,6 +74,7 @@ import {
   digHole,
   drinkAtWaterSource,
   dryRainSoakedChicken,
+  recordHumanLureSunflower,
   expireFoods,
   finishChickenNight,
   improveCoopAbility,
@@ -145,6 +152,7 @@ const SFX_DRINK_KEY = 'sfx-drink';
 const SFX_REWARD_KEY = 'sfx-reward';
 const SFX_UPGRADE_KEY = 'sfx-upgrade';
 const SFX_NIGHT_RUSTLE_KEY = 'sfx-night-rustle';
+const HUMAN_LURE_SEED_DURATION = 0.18;
 const CHICKEN_WALK_MOVE_EPSILON = 0.04;
 const CHICKEN_WALK_TELEPORT_DISTANCE = 28;
 const HOLE_REST_RADIUS = 36;
@@ -699,6 +707,8 @@ export class GameScene extends Phaser.Scene {
     return {
       x: (right ? 1 : 0) - (left ? 1 : 0),
       y: (down ? 1 : 0) - (up ? 1 : 0),
+      spacePressed,
+      enterPressed,
       sprintHeld: this.keyboardState.isDown('ShiftLeft') || this.keyboardState.isDown('ShiftRight'),
       peckPressed: spacePressed,
       scratchHeld: this.keyboardState.isDown('KeyE'),
@@ -861,7 +871,9 @@ export class GameScene extends Phaser.Scene {
     }
     if (!this.state.facilityLife.activity) this.updateFacilityIdle(dt, hasMove);
 
+    const inTreeShade = isInLowerLeftShade(this.state.chicken);
     const inShade =
+      inTreeShade ||
       isShadowy(this.state.chicken) ||
       ownedFacilityAt(this.state.yard, this.state.chicken) === 'shade-shelter' ||
       holeRestSeconds > 0;
@@ -909,6 +921,7 @@ export class GameScene extends Phaser.Scene {
           sprinting: canSprint,
           moving: hasMove,
           inShade,
+          treeShadeCooling: inTreeShade,
           drinking: false,
           raining: this.state.weather === 'rain',
           night: this.state.flow.phase === 'chicken-night',
@@ -1341,7 +1354,9 @@ export class GameScene extends Phaser.Scene {
     if (this.state.egg && !this.state.egg.found) {
       this.state.eggSearch = advanceEggSearch(this.state.eggSearch, dt);
     }
-    updateIdleChickenWander(this.state, dt);
+    advanceDuskCollection(this.duskCollection, dt);
+    const handledLureChicken = this.updateHumanLureChicken(dt);
+    if (!handledLureChicken) updateIdleChickenWander(this.state, dt);
     this.updateEggGuidance(dt);
 
     if (
@@ -1382,18 +1397,31 @@ export class GameScene extends Phaser.Scene {
 
     if (this.state.egg && !this.state.egg.found) {
       const eggDistance = distance(this.state.human, this.state.egg);
-      if (actions.searchPressed) {
+      if (actions.enterPressed) {
         if (eggDistance < EGG_PICKUP_RANGE) {
           collectEgg(this.state);
           applyFlowEvent(this.state, { type: 'egg-found' });
           this.playSfx(SFX_REWARD_KEY, 0.64);
           this.revealEgg();
           this.clearEggClueView();
+          return;
         } else {
           this.state.message = `这里没有蛋；${this.state.profile.name}抬起头，朝藏蛋的方向叫了两声。`;
           this.showEggDirectionClue();
+          return;
         }
+      } else if (actions.spacePressed && eggDistance < EGG_PICKUP_RANGE) {
+        collectEgg(this.state);
+        applyFlowEvent(this.state, { type: 'egg-found' });
+        this.playSfx(SFX_REWARD_KEY, 0.64);
+        this.revealEgg();
+        this.clearEggClueView();
+        return;
       }
+    }
+
+    if (this.state.flow.phase === 'morning-human' && actions.spacePressed) {
+      if (this.placeHumanLureSeed()) return;
     }
 
     if (actions.interactPressed) {
@@ -1414,6 +1442,92 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+  }
+
+  private placeHumanLureSeed() {
+    this.duskCollection.nextSeedId = Math.max(this.duskCollection.nextSeedId, this.state.nextId);
+    const seed = placeLureSeed(this.duskCollection, this.state.human);
+    if (!seed) {
+      this.state.message = '再等一下，再轻轻放下一粒瓜子。';
+      return false;
+    }
+
+    this.state.nextId = Math.max(this.state.nextId, this.duskCollection.nextSeedId);
+    const expiresAt = Math.min(1, this.state.time + HUMAN_LURE_SEED_DURATION);
+    const food: FoodEntity = {
+      id: seed.id,
+      x: seed.x,
+      y: seed.y,
+      type: 'sunflower',
+      visibleAt: this.state.time,
+      expiresAt,
+      freshUntil: expiresAt,
+      fromHuman: true,
+    };
+    this.state.foods.push(food);
+    this.foodViews.set(food.id, this.createFoodView(food));
+    this.showScatterFx(food);
+    this.syncFoodViews();
+    this.playSfx(SFX_PECK_KEY, 0.28);
+    this.state.message = '你在地上轻轻放下一粒瓜子。';
+    return true;
+  }
+
+  private updateHumanLureChicken(dt: number) {
+    if (this.state.flow.phase !== 'morning-human') return false;
+    if (this.state.chickenWander.followSeconds > 0) return false;
+    if (this.duskCollection.eatPause > 0) {
+      this.state.chickenWander.target = null;
+      return true;
+    }
+
+    const targetSeed = findLureSeedTarget(
+      this.duskCollection,
+      this.state.chicken,
+      visionRadiusFor(this.state.affection),
+    );
+    if (!targetSeed) return false;
+
+    const food = this.state.foods.find((candidate) => candidate.id === targetSeed.id && isHumanLureFood(candidate));
+    if (!food) {
+      this.duskCollection.seeds = this.duskCollection.seeds.filter((seed) => seed.id !== targetSeed.id);
+      if (this.duskCollection.targetSeedId === targetSeed.id) this.duskCollection.targetSeedId = null;
+      return false;
+    }
+
+    const vector = {
+      x: food.x - this.state.chicken.x,
+      y: food.y - this.state.chicken.y,
+    };
+    const length = Math.hypot(vector.x, vector.y);
+    if (length <= 18) {
+      const result = peckFood(this.state, food);
+      eatLureSeed(this.duskCollection, food.id);
+      if (result === 'eaten') {
+        this.foodViews.get(food.id)?.destroy();
+        this.foodViews.delete(food.id);
+        this.playSfx(SFX_PECK_KEY, 0.34);
+        this.showPeckFx(food);
+        if (recordHumanLureSunflower(this.state)) {
+          this.showHeartFx(this.state.chicken);
+        }
+      }
+      return true;
+    }
+
+    const step = Math.min(length, LURE_SEED_MOVE_SPEED * dt);
+    const next = {
+      x: this.state.chicken.x + (vector.x / length) * step,
+      y: this.state.chicken.y + (vector.y / length) * step,
+    };
+    if (!isBlocked(next, 18)) {
+      this.state.chicken = next;
+    }
+    if (Math.abs(vector.x) > 2) this.state.chickenWander.facing = vector.x > 0 ? 1 : -1;
+    this.state.chickenWander.target = null;
+    this.state.chickenWander.wait = 0;
+    this.state.chickenWander.pause = 0;
+    return true;
   }
 
   private openCloseInteraction() {
@@ -1462,7 +1576,11 @@ export class GameScene extends Phaser.Scene {
   private switchToChicken() {
     this.duskCollection = createDuskCollectionState();
     this.state.handLanternActive = false;
+    this.state.chickenWander.followSeconds = 0;
+    this.state.chickenWander.followOffset = null;
+    this.state.chickenWander.lureSunflowerStreak = 0;
     this.clearEggClueView();
+    this.clearHumanLureSeeds();
     this.clearDuskSeedViews();
     this.clearHouseResponseLight();
     this.chicken.setVisible(true);
@@ -1849,6 +1967,22 @@ export class GameScene extends Phaser.Scene {
     this.duskSeedViews.clear();
   }
 
+  private clearHumanLureSeeds() {
+    const lureIds = new Set(
+      this.state.foods.filter((food) => isHumanLureFood(food)).map((food) => food.id),
+    );
+    if (lureIds.size === 0) return;
+    this.state.foods = this.state.foods.filter((food) => !lureIds.has(food.id));
+    for (const id of lureIds) {
+      this.foodViews.get(id)?.destroy();
+      this.foodViews.delete(id);
+    }
+    this.duskCollection.seeds = this.duskCollection.seeds.filter((seed) => !lureIds.has(seed.id));
+    if (this.duskCollection.targetSeedId !== null && lureIds.has(this.duskCollection.targetSeedId)) {
+      this.duskCollection.targetSeedId = null;
+    }
+  }
+
   private showWeaselRustleFx(position: Vec2) {
     const rustle = this.add
       .circle(position.x, position.y, 18, 0x71805a, 0.08)
@@ -2126,12 +2260,13 @@ export class GameScene extends Phaser.Scene {
       this.drawWildArea(g, area);
     }
 
-    this.drawTreeShade(g);
     this.drawPlantingZone(g);
 
     for (const patch of PLANT_PATCHES) {
       this.drawPlantPatch(g, patch);
     }
+
+    this.drawTreeShade(g);
 
     for (const tree of TREE_POSITIONS) {
       this.drawTree(g, tree);
@@ -2264,7 +2399,7 @@ export class GameScene extends Phaser.Scene {
   private drawTree(g: Phaser.GameObjects.Graphics, point: Vec2) {
     const big = point === LOWER_LEFT_SHADE_TREE;
     g.fillStyle(0x5d3b24, 1);
-    g.fillRoundedRect(point.x - (big ? 16 : 12), point.y + 18, big ? 32 : 24, big ? 60 : 42, 8);
+    g.fillRoundedRect(point.x - (big ? 16 : 12), point.y + 18, big ? 32 : 24, big ? 104 : 42, 8);
     g.fillStyle(0x284a2d, 1);
     g.fillCircle(point.x, point.y, big ? 76 : 56);
     g.fillStyle(0x3f7238, 0.95);
@@ -2537,8 +2672,22 @@ export class GameScene extends Phaser.Scene {
   }
 
   private expireAndSyncFoods() {
+    const activeHumanLureIds = new Set(
+      this.state.foods.filter((food) => isHumanLureFood(food)).map((food) => food.id),
+    );
     const foodUpdate = expireFoods(this.state);
     if (foodUpdate.expiredIds.length === 0 && foodUpdate.spawnedFoods.length === 0) return;
+    const expiredHumanLureIds = foodUpdate.expiredIds.filter((id) => activeHumanLureIds.has(id));
+    if (expiredHumanLureIds.length > 0) {
+      const expiredSet = new Set(expiredHumanLureIds);
+      this.duskCollection.seeds = this.duskCollection.seeds.filter((seed) => !expiredSet.has(seed.id));
+      if (
+        this.duskCollection.targetSeedId !== null &&
+        expiredSet.has(this.duskCollection.targetSeedId)
+      ) {
+        this.duskCollection.targetSeedId = null;
+      }
+    }
     for (const expiredId of foodUpdate.expiredIds) {
       this.foodViews.get(expiredId)?.destroy();
       this.foodViews.delete(expiredId);
@@ -2562,7 +2711,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private currentEggSpot(): EggSpot | null {
-    return EGG_SPOTS.find((spot) => spot.id === this.state.eggSearch.spotId) ?? null;
+    const staticSpot = EGG_SPOTS.find((spot) => spot.id === this.state.eggSearch.spotId);
+    if (staticSpot) return staticSpot;
+    if (!this.state.egg || !this.state.eggSearch.spotId.startsWith('hole-')) return null;
+    return {
+      id: this.state.eggSearch.spotId,
+      position: { x: this.state.egg.x, y: this.state.egg.y },
+      cluePosition: { x: this.state.egg.x + 18, y: this.state.egg.y - 12 },
+      unlockDay: 1,
+      clueKind: 'scratched-soil',
+    };
   }
 
   private updateEggGuidance(dt: number) {
@@ -2724,6 +2882,10 @@ export class GameScene extends Phaser.Scene {
     this.human.setPosition(this.state.human.x, this.state.human.y);
     const showEscortLantern =
       this.state.mode === 'human' && this.state.flow.phase === 'dusk-human';
+    const showLureVision =
+      this.state.mode === 'human' &&
+      this.state.flow.phase === 'morning-human' &&
+      this.state.foods.some((food) => isHumanLureFood(food));
     this.humanLanternGlow
       ?.setVisible(showEscortLantern)
       .setPosition(this.state.human.x, this.state.human.y - 10);
@@ -2732,7 +2894,9 @@ export class GameScene extends Phaser.Scene {
       ?.setVisible(showEscortLantern && this.state.handLanternActive)
       .setPosition(lanternCenter.x, lanternCenter.y);
     this.duskVisionRing
-      ?.setVisible(showEscortLantern && this.duskCollection.phase !== 'inside')
+      ?.setVisible(
+        (showEscortLantern && this.duskCollection.phase !== 'inside') || showLureVision,
+      )
       .setPosition(this.state.chicken.x, this.state.chicken.y)
       .setRadius(visionRadiusFor(this.state.affection));
     const showYardLamp =
@@ -3219,6 +3383,10 @@ function isTouchOptionOrNull(value: unknown): value is TouchOption | null {
 
 function isHuntingFood(type: FoodEntity['type']) {
   return type === 'cricket' || type === 'beetle' || type === 'nightBug';
+}
+
+function isHumanLureFood(food: FoodEntity) {
+  return food.type === 'sunflower' && food.fromHuman === true;
 }
 
 function isHeatFreeFood(type: FoodEntity['type']) {
