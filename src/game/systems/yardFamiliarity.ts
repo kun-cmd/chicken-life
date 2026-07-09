@@ -3,17 +3,18 @@ import {
   COOP,
   HOUSE_PATH,
   isInsideRect,
+  isInLeftTreeArea,
+  isInPlantingZone,
+  isInUpperWildArea,
   MAIN_PATH,
-  POND,
-  isInPlantPatch,
-  TREE_POSITIONS,
 } from '../content/yard';
 
 export type YardRegionId =
   | 'house-yard'
   | 'main-path'
-  | 'pond-bank'
-  | 'tree-shade'
+  | 'left-tree'
+  | 'planting-zone'
+  | 'upper-wilds'
   | 'coop-yard'
   | 'outer-growth';
 
@@ -35,25 +36,13 @@ export function createYardFamiliarityState(): YardFamiliarityState {
     regions: {
       'house-yard': { familiarity: 0, firstSeenDay: 0, tipShown: false },
       'main-path': { familiarity: 0, firstSeenDay: 0, tipShown: false },
-      'pond-bank': { familiarity: 0, firstSeenDay: 0, tipShown: false },
-      'tree-shade': { familiarity: 0, firstSeenDay: 0, tipShown: false },
+      'left-tree': { familiarity: 0, firstSeenDay: 0, tipShown: false },
+      'planting-zone': { familiarity: 0, firstSeenDay: 0, tipShown: false },
+      'upper-wilds': { familiarity: 0, firstSeenDay: 0, tipShown: false },
       'coop-yard': { familiarity: 0, firstSeenDay: 0, tipShown: false },
       'outer-growth': { familiarity: 0, firstSeenDay: 0, tipShown: false },
     },
   };
-}
-
-function nearestTreeDistance(point: Vec2): number {
-  let best = Infinity;
-  for (const tree of TREE_POSITIONS) {
-    const d = Math.hypot(point.x - tree.x, point.y - tree.y);
-    if (d < best) best = d;
-  }
-  return best;
-}
-
-function nearestPondDistance(point: Vec2): number {
-  return Math.hypot(point.x - (POND.x + POND.width / 2), point.y - (POND.y + POND.height / 2));
 }
 
 function nearestCoopDistance(point: Vec2): number {
@@ -65,14 +54,16 @@ export function yardRegionFor(point: Vec2): YardRegionId {
     return 'main-path';
   }
 
-  const pondDist = nearestPondDistance(point);
-  if (pondDist < 130) {
-    return 'pond-bank';
+  if (isInLeftTreeArea(point)) {
+    return 'left-tree';
   }
 
-  const treeDist = nearestTreeDistance(point);
-  if (treeDist < 110) {
-    return 'tree-shade';
+  if (isInPlantingZone(point)) {
+    return 'planting-zone';
+  }
+
+  if (isInUpperWildArea(point)) {
+    return 'upper-wilds';
   }
 
   if (isInsideRect(point, COOP, 14)) {
@@ -84,11 +75,7 @@ export function yardRegionFor(point: Vec2): YardRegionId {
     return 'coop-yard';
   }
 
-  if (isInPlantPatch(point)) {
-    return 'outer-growth';
-  }
-
-  if (point.x < 500 && point.y < 400) {
+  if (point.x > 360 && point.x < 1140 && point.y < 620) {
     return 'house-yard';
   }
 
@@ -147,7 +134,9 @@ function safeFamiliarity(saved: unknown, fresh: YardFamiliarityState): YardFamil
   if (!inputRegions || typeof inputRegions !== 'object') return fresh;
   const restored = createYardFamiliarityState();
   for (const id of Object.keys(restored.regions) as YardRegionId[]) {
-    const savedEntry = (inputRegions as Record<string, unknown>)[id];
+    const savedEntry =
+      (inputRegions as Record<string, unknown>)[id] ??
+      (inputRegions as Record<string, unknown>)[legacyRegionId(id)];
     if (savedEntry && typeof savedEntry === 'object') {
       const entry = savedEntry as Record<string, unknown>;
       restored.regions[id] = {
@@ -158,6 +147,18 @@ function safeFamiliarity(saved: unknown, fresh: YardFamiliarityState): YardFamil
     }
   }
   return restored;
+}
+
+function legacyRegionId(id: YardRegionId) {
+  return {
+    'house-yard': 'house-yard',
+    'main-path': 'main-path',
+    'left-tree': 'tree-shade',
+    'planting-zone': 'outer-growth',
+    'upper-wilds': 'pond-bank',
+    'coop-yard': 'coop-yard',
+    'outer-growth': 'outer-growth',
+  }[id];
 }
 
 function clampFamiliarity(value: number): number {

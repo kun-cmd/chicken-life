@@ -1,5 +1,6 @@
 import type { Vec2 } from '../simulation/state';
 import type { ChickenProfile } from '../profile/chickenProfile';
+import type { YardRegionId } from './yardFamiliarity';
 import { createSeededRandom } from './seededRandom';
 
 export type ForagingFoodType =
@@ -64,6 +65,7 @@ export interface FamiliarityFoodPoolContext {
   dusk: boolean;
   day: number;
   familiarity: number;
+  region?: YardRegionId;
 }
 
 const FAMILIARITY_FOOD_THRESHOLDS: {
@@ -80,6 +82,34 @@ const FAMILIARITY_FOOD_THRESHOLDS: {
 export function foodPoolForFamiliarity(
   context: FamiliarityFoodPoolContext,
 ): ForagingFoodType[] {
+  if (!context.dusk && context.region === 'left-tree') {
+    const pool: ForagingFoodType[] = ['grain', 'grass'];
+    if (
+      context.profile.awakenedAbilities.sprint &&
+      context.familiarity >= 70
+    ) {
+      pool.push('cricket');
+    }
+    return pool;
+  }
+
+  if (!context.dusk && context.region === 'upper-wilds') {
+    const pool: ForagingFoodType[] = ['grass', 'cricket'];
+    if (
+      context.profile.awakenedAbilities.scratch &&
+      context.familiarity >= 35
+    ) {
+      pool.push('worm');
+    }
+    if (
+      context.profile.awakenedAbilities.sprint &&
+      context.familiarity >= 55
+    ) {
+      pool.push('beetle');
+    }
+    return pool;
+  }
+
   const pool = foodPoolFor(context.profile, context.dusk, context.day);
   if (context.dusk) return pool;
 

@@ -91,3 +91,49 @@ test('familiarity food pool does not add daylight extras at dusk', () => {
   assert.equal(pool.includes('beetle'), false);
   assert.equal(pool.includes('berry'), false);
 });
+
+test('left tree region only adds low yield bugs at high familiarity', () => {
+  const profile = createChickenProfile(1234);
+  const low = foodPoolForFamiliarity({
+    profile,
+    dusk: false,
+    day: 8,
+    familiarity: 40,
+    region: 'left-tree',
+  });
+  const high = foodPoolForFamiliarity({
+    profile,
+    dusk: false,
+    day: 8,
+    familiarity: 80,
+    region: 'left-tree',
+  });
+
+  assert.deepEqual(low, ['grain', 'grass']);
+  assert.deepEqual(high, ['grain', 'grass', 'cricket']);
+});
+
+test('upper wilds start with grass and crickets, then improve with familiarity', () => {
+  const profile = createChickenProfile(1234);
+  profile.awakenedAbilities.scratch = true;
+
+  const low = foodPoolForFamiliarity({
+    profile,
+    dusk: false,
+    day: 1,
+    familiarity: 0,
+    region: 'upper-wilds',
+  });
+  const high = foodPoolForFamiliarity({
+    profile,
+    dusk: false,
+    day: 1,
+    familiarity: 60,
+    region: 'upper-wilds',
+  });
+
+  assert.deepEqual(low, ['grass', 'cricket']);
+  assert.equal(high.includes('worm'), true);
+  assert.equal(high.includes('beetle'), true);
+  assert.equal(high.includes('berry'), false);
+});

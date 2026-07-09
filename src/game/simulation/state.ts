@@ -4,7 +4,6 @@ import {
   HOUSE,
   KEEPER_ROUTE,
   KEEPER_START,
-  POND,
   PLANT_PATCHES,
   SAFE_LIGHTS,
   TREE_POSITIONS,
@@ -13,8 +12,8 @@ import {
   distance,
   isBlocked,
   isInCoop,
+  isInLowerLeftShade,
   isInPlantPatch,
-  isNearPond,
   isOnPath,
 } from '../content/yard';
 import { EGG_SPOTS, selectEggSpot } from '../content/eggSpots';
@@ -90,6 +89,7 @@ import {
   createYardFamiliarityState,
   regionFamiliarityFor,
   restoreYardFamiliarityState,
+  yardRegionFor,
   type YardFamiliarityState,
 } from '../systems/yardFamiliarity';
 import {
@@ -885,7 +885,6 @@ function nearestHole(holes: readonly HoleEntity[], position: Vec2, radius: numbe
 
 function baseHoleMoisture(state: GameState, position: Vec2) {
   if (state.weather === 'rain') return 0.78;
-  if (isNearPond(position)) return 0.58;
   if (isShadowy(position)) return 0.38;
   return 0.16;
 }
@@ -946,12 +945,11 @@ export function updateWaterBoost(state: GameState, actionSeconds: number) {
 
 export function drinkAtWaterSource(state: GameState, dt: number) {
   if (state.mode !== 'chicken') return false;
-  const atPond = isNearPond(state.chicken);
   const atBasin =
     state.yard.owned.includes('water-basin') &&
     distance(state.chicken, WATER_BASIN_POSITION) < 58 &&
     state.waterBasinLevel > 0;
-  if (!atPond && !atBasin) return false;
+  if (!atBasin) return false;
 
   const before = state.waterBoost;
   const drinkAmount = 42 * dt;
@@ -2428,7 +2426,7 @@ export function isGoodFoodSpot(point: Vec2) {
 }
 
 export function isShadowy(point: Vec2) {
-  return isInPlantPatch(point) || TREE_POSITIONS.some((tree) => distance(tree, point) < 98);
+  return isInLowerLeftShade(point) || TREE_POSITIONS.some((tree) => distance(tree, point) < 98);
 }
 
 export function isNearLight(point: Vec2, lamp: number, yardLampActive = false) {
@@ -2520,6 +2518,7 @@ function createFamiliarFoodPlan(
       dusk,
       day: state.day,
       familiarity: regionFamiliarityFor(state.yardFamiliarity, point),
+      region: yardRegionFor(point),
     });
     return {
       ...point,
@@ -2691,23 +2690,6 @@ function randomFoodPointOutOfView(state: GameState, preferShadow = false): Vec2 
     if (distance(candidate, state.chicken) >= RESTOCK_DISTANCE_FROM_CHICKEN) return candidate;
   }
   return randomFoodPoint(preferShadow);
-}
-
-function randomPondBankPoint(): Vec2 {
-  for (let i = 0; i < 80; i += 1) {
-    const angle = Math.random() * Math.PI * 2;
-    const radiusX = POND.width * 0.62 + Math.random() * 42;
-    const radiusY = POND.height * 0.62 + Math.random() * 34;
-    const candidate = {
-      x: POND.x + POND.width * 0.5 + Math.cos(angle) * radiusX,
-      y: POND.y + POND.height * 0.5 + Math.sin(angle) * radiusY,
-    };
-    if (isGoodFoodSpot(candidate) && isNearPond(candidate)) return candidate;
-  }
-  return {
-    x: POND.x + POND.width + 36,
-    y: POND.y + POND.height * 0.5,
-  };
 }
 
 function randomYardPoint(): Vec2 {

@@ -118,8 +118,9 @@ const touchLabels: Record<TouchOption, string> = {
 const yardRegionLabels: Record<string, string> = {
   'house-yard': '屋边',
   'main-path': '主路',
-  'pond-bank': '池塘边',
-  'tree-shade': '树荫',
+  'left-tree': '左下树区',
+  'planting-zone': '种植区',
+  'upper-wilds': '上方野地',
   'coop-yard': '鸡舍边',
   'outer-growth': '外围草丛',
 };
@@ -185,7 +186,7 @@ function renderHud(snapshot: HudSnapshot) {
   hud.pressureWrap.dataset.quality = snapshot.projectedEggQuality;
   hud.pressureWrap.dataset.score = String(snapshot.eggQualityScore);
   hud.eggPressureCurrent.textContent = eggPressureText(snapshot);
-  hud.pressureWrap.title = `当前 ${eggQualityLabel(snapshot.projectedEggQuality)}：蛋势 ${snapshot.eggQualityScore}；有效营养 ${snapshot.effectiveNutrition} / 原始营养 ${snapshot.nutrition}，夜压 ${snapshot.pressure}`;
+  hud.pressureWrap.title = `当前 ${eggQualityLabel(snapshot.projectedEggQuality)}：饱食度 ${snapshot.eggQualityScore}；有效营养 ${snapshot.effectiveNutrition} / 原始营养 ${snapshot.nutrition}，夜压 ${snapshot.pressure}`;
   hud.contextPrompt.textContent = snapshot.contextPrompt;
   if (document.activeElement !== hud.debugAffection) {
     hud.debugAffection.value = String(snapshot.affection);
@@ -261,10 +262,10 @@ function eggPressureText(snapshot: HudSnapshot) {
         ? `差${EGG_QUALITY_THRESHOLDS.good - score}到较好蛋`
         : score < EGG_QUALITY_THRESHOLDS.excellent
           ? `差${EGG_QUALITY_THRESHOLDS.excellent - score}到金蛋`
-          : '蛋势够金蛋',
+          : '饱食度够金蛋',
     snapshot.eggDryRest ? '干燥不降段' : '潮湿降一段',
   ];
-  return `当前 ${quality} · 蛋势 ${score} · ${facts.join(' / ')} · ${nextThreshold}`;
+  return `当前 ${quality} · 饱食度 ${score} · ${facts.join(' / ')} · ${nextThreshold}`;
 }
 
 function renderEnding(snapshot: HudSnapshot) {

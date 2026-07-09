@@ -8,17 +8,20 @@ import {
   FLUTTER_TARGETS,
   HOUSE,
   HOUSE_PATH,
+  LOWER_LEFT_SHADE_RADIUS,
+  LOWER_LEFT_SHADE_TREE,
   MAIN_PATH,
-  POND,
+  PLANTING_BED,
+  PLANTING_ZONE,
   PLANT_PATCHES,
   SAFE_LIGHTS,
   TREE_POSITIONS,
+  UPPER_WILD_AREAS,
   WORLD_HEIGHT,
   WORLD_WIDTH,
   distance,
   isBlocked,
   isInCoop,
-  isNearPond,
   isOnPath,
 } from '../../game/content/yard';
 import { tutorialForAbility } from '../../game/content/abilityTutorials';
@@ -873,8 +876,9 @@ export class GameScene extends Phaser.Scene {
         );
         if (explored.canShowTip) {
           const tipMsgs: Record<string, string> = {
-            'pond-bank': '鸡伸长脖子，歪着头听池塘边的水声。',
-            'tree-shade': '鸡在树荫下停了一下，警惕地四处张望。',
+            'left-tree': '鸡在树影边停了一下，警惕地四处张望。',
+            'planting-zone': '鸡绕着规整的泥地看了看，还没弄明白这片地。',
+            'upper-wilds': '鸡走到更陌生的上方野地，伸长脖子听草里的动静。',
             'coop-yard': '鸡在鸡舍附近踱步，不时回头看看。',
             'outer-growth': '鸡钻进杂草丛，小心翼翼地探路。',
             'main-path': '鸡在小路上站定，确认四周安全。',
@@ -2117,7 +2121,13 @@ export class GameScene extends Phaser.Scene {
     this.drawRect(g, MAIN_PATH, 0xb88e5e, 1);
     this.drawRect(g, HOUSE_PATH, 0xb88e5e, 1);
     this.drawPathPebbles(g);
-    this.drawPond(g);
+
+    for (const area of UPPER_WILD_AREAS) {
+      this.drawWildArea(g, area);
+    }
+
+    this.drawTreeShade(g);
+    this.drawPlantingZone(g);
 
     for (const patch of PLANT_PATCHES) {
       this.drawPlantPatch(g, patch);
@@ -2208,21 +2218,35 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private drawPond(g: Phaser.GameObjects.Graphics) {
-    const cx = POND.x + POND.width * 0.5;
-    const cy = POND.y + POND.height * 0.5;
-    g.fillStyle(0x314a3b, 0.92);
-    g.fillEllipse(cx, cy + 3, POND.width + 26, POND.height + 20);
-    g.fillStyle(0x3d766f, 1);
-    g.fillEllipse(cx, cy, POND.width, POND.height);
-    g.fillStyle(0x79b7aa, 0.34);
-    g.fillEllipse(cx - POND.width * 0.18, cy - POND.height * 0.15, POND.width * 0.42, POND.height * 0.22);
-    g.fillStyle(0x20372f, 0.24);
-    g.fillEllipse(cx + POND.width * 0.24, cy + POND.height * 0.18, POND.width * 0.52, POND.height * 0.26);
-    g.fillStyle(0xb4d289, 0.58);
-    for (let i = 0; i < 10; i += 1) {
-      const angle = (i / 10) * Math.PI * 2;
-      g.fillEllipse(cx + Math.cos(angle) * (POND.width * 0.58), cy + Math.sin(angle) * (POND.height * 0.6), 10, 5);
+  private drawWildArea(g: Phaser.GameObjects.Graphics, rect: { x: number; y: number; width: number; height: number }) {
+    g.fillStyle(0x526f34, 0.18);
+    g.fillRoundedRect(rect.x, rect.y, rect.width, rect.height, 18);
+    for (let i = 0; i < 26; i += 1) {
+      const x = rect.x + 22 + Math.random() * (rect.width - 44);
+      const y = rect.y + 18 + Math.random() * (rect.height - 36);
+      g.fillStyle(i % 4 === 0 ? 0x9fb762 : 0x6e8a45, 0.72);
+      g.fillTriangle(x, y + 13, x + 7, y - 13, x + 15, y + 13);
+    }
+  }
+
+  private drawTreeShade(g: Phaser.GameObjects.Graphics) {
+    g.fillStyle(0x273926, 0.24);
+    g.fillEllipse(
+      LOWER_LEFT_SHADE_TREE.x + 28,
+      LOWER_LEFT_SHADE_TREE.y + 48,
+      LOWER_LEFT_SHADE_RADIUS * 1.9,
+      LOWER_LEFT_SHADE_RADIUS * 1.08,
+    );
+  }
+
+  private drawPlantingZone(g: Phaser.GameObjects.Graphics) {
+    g.fillStyle(0x59452f, 0.2);
+    g.fillRoundedRect(PLANTING_ZONE.x, PLANTING_ZONE.y, PLANTING_ZONE.width, PLANTING_ZONE.height, 16);
+    g.fillStyle(0x5a432c, 0.78);
+    g.fillRoundedRect(PLANTING_BED.x, PLANTING_BED.y, PLANTING_BED.width, PLANTING_BED.height, 10);
+    g.lineStyle(4, 0x8c6841, 0.74);
+    for (let offset = 20; offset < PLANTING_BED.width; offset += 34) {
+      g.lineBetween(PLANTING_BED.x + offset, PLANTING_BED.y + 10, PLANTING_BED.x + offset - 16, PLANTING_BED.y + PLANTING_BED.height - 10);
     }
   }
 
@@ -2238,15 +2262,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawTree(g: Phaser.GameObjects.Graphics, point: Vec2) {
+    const big = point === LOWER_LEFT_SHADE_TREE;
     g.fillStyle(0x5d3b24, 1);
-    g.fillRoundedRect(point.x - 12, point.y + 18, 24, 42, 8);
+    g.fillRoundedRect(point.x - (big ? 16 : 12), point.y + 18, big ? 32 : 24, big ? 60 : 42, 8);
     g.fillStyle(0x284a2d, 1);
-    g.fillCircle(point.x, point.y, 56);
+    g.fillCircle(point.x, point.y, big ? 76 : 56);
     g.fillStyle(0x3f7238, 0.95);
-    g.fillCircle(point.x - 30, point.y + 12, 40);
-    g.fillCircle(point.x + 31, point.y + 8, 42);
+    g.fillCircle(point.x - (big ? 42 : 30), point.y + 12, big ? 54 : 40);
+    g.fillCircle(point.x + (big ? 42 : 31), point.y + 8, big ? 56 : 42);
     g.fillStyle(0x668d43, 0.45);
-    g.fillCircle(point.x - 10, point.y - 24, 26);
+    g.fillCircle(point.x - 10, point.y - (big ? 34 : 24), big ? 34 : 26);
   }
 
   private drawHouse(g: Phaser.GameObjects.Graphics) {
