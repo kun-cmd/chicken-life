@@ -3,6 +3,7 @@ import type { Vec2 } from '../simulation/state';
 export type YardUpgradeId =
   | 'shade-shelter'
   | 'low-perch'
+  | 'yard-speaker'
   | 'water-basin'
   | 'premium-feed'
   | 'coop-roof'
@@ -22,6 +23,7 @@ export const YARD_LAMP_POSITION: Vec2 = { x: 930, y: 650 };
 export const WATER_BASIN_POSITION: Vec2 = { x: 875, y: 740 };
 export const PREMIUM_FEED_POSITION: Vec2 = { x: 620, y: 610 };
 export const COOP_ROOF_POSITION: Vec2 = { x: 1128, y: 502 };
+export const YARD_SPEAKER_POSITION: Vec2 = { x: 745, y: 676 };
 
 export const YARD_UPGRADES: YardUpgradeDefinition[] = [
   {
@@ -44,6 +46,13 @@ export const YARD_UPGRADES: YardUpgradeDefinition[] = [
     cost: 4,
     position: PREMIUM_FEED_POSITION,
     effect: '清晨舀一勺，让院子里多一份稳定谷物',
+  },
+  {
+    id: 'yard-speaker',
+    name: '旧音箱',
+    cost: 4,
+    position: YARD_SPEAKER_POSITION,
+    effect: '播放原创小院节拍，让鸡、麻雀和猫进入短暂的舞会状态',
   },
   {
     id: 'shade-shelter',

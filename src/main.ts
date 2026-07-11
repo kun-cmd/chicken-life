@@ -3,6 +3,7 @@ import './style.css';
 import { GameScene } from './phaser/scenes/GameScene';
 import type { HudSnapshot } from './game/simulation/state';
 import { YARD_UPGRADES } from './game/content/yardUpgrades';
+import { SEED_DEFINITIONS, seedDefinition, type GardenPlot, type SeedType } from './game/systems/garden';
 import { foodDisplayName, type ForagingFoodType } from './game/systems/foraging';
 import type { TouchOption } from './game/systems/closeInteraction';
 import { EGG_QUALITY_THRESHOLDS, eggQualityLabel } from './game/systems/eggEconomy';
@@ -16,6 +17,11 @@ interface CloseInteractionOpenDetail {
 interface CloseInteractionPlayDetail {
   accepted: boolean;
   touch: TouchOption | null;
+}
+
+interface PointerWorldDetail {
+  x: number;
+  y: number;
 }
 
 new Phaser.Game({
@@ -68,6 +74,11 @@ const hud = {
   yardWoodSummary: document.querySelector<HTMLElement>('#yardWoodSummary')!,
   eggAlbumList: document.querySelector<HTMLElement>('#eggAlbumList')!,
   upgradeChoices: document.querySelector<HTMLElement>('#upgradeChoices')!,
+  seedChoices: document.querySelector<HTMLElement>('#seedChoices')!,
+  gardenPanel: document.querySelector<HTMLElement>('#gardenPanel')!,
+  gardenPanelClose: document.querySelector<HTMLButtonElement>('#gardenPanelClose')!,
+  gardenPanelSummary: document.querySelector<HTMLElement>('#gardenPanelSummary')!,
+  gardenPlotChoices: document.querySelector<HTMLElement>('#gardenPlotChoices')!,
   saveWarning: document.querySelector<HTMLElement>('#saveWarning')!,
   dayLabel: document.querySelector<HTMLElement>('#dayLabel')!,
   phaseLabel: document.querySelector<HTMLElement>('#phaseLabel')!,
@@ -94,6 +105,7 @@ const hud = {
   debugSetDay: document.querySelector<HTMLButtonElement>('#debugSetDay')!,
   debugAffection: document.querySelector<HTMLInputElement>('#debugAffection')!,
   debugAffectionLabel: document.querySelector<HTMLElement>('#debugAffectionLabel')!,
+  debugMouse: document.querySelector<HTMLElement>('#debugMouse')!,
   debugFamiliarity: document.querySelector<HTMLElement>('#debugFamiliarity')!,
   masterVolume: document.querySelector<HTMLInputElement>('#masterVolume')!,
   masterVolumeLabel: document.querySelector<HTMLElement>('#masterVolumeLabel')!,
@@ -103,6 +115,7 @@ let toastTimer = 0;
 let rewardTimer = 0;
 let debugOpen = false;
 let yardPanelOpen = false;
+let gardenPanelOpen = false;
 let latestSnapshot: HudSnapshot | null = null;
 let endingSequenceStarted = false;
 let endingTimer = 0;
@@ -116,13 +129,11 @@ const touchLabels: Record<TouchOption, string> = {
 };
 
 const yardRegionLabels: Record<string, string> = {
-  'house-yard': '屋边',
-  'main-path': '主路',
-  'left-tree': '左下树区',
-  'planting-zone': '种植区',
+  'left-tree': '左下树荫',
+  'right-bottom': '右下区',
   'upper-wilds': '上方野地',
-  'coop-yard': '鸡舍边',
-  'outer-growth': '外围草丛',
+  'left-middle': '左中区',
+  'right-middle': '右中区',
 };
 
 appRoot.tabIndex = 0;
@@ -133,6 +144,11 @@ appRoot.addEventListener('pointerdown', () => {
 
 window.addEventListener('chicken-life:hud', (event) => {
   renderHud((event as CustomEvent<HudSnapshot>).detail);
+});
+
+window.addEventListener('chicken-life:pointer-world', (event) => {
+  const detail = (event as CustomEvent<PointerWorldDetail>).detail;
+  hud.debugMouse.textContent = `鼠标坐标：x ${detail.x}，y ${detail.y}`;
 });
 
 window.addEventListener('chicken-life:close-open', (event) => {
@@ -194,6 +210,7 @@ function renderHud(snapshot: HudSnapshot) {
   hud.debugAffectionLabel.textContent = String(snapshot.affection);
   renderDebugFamiliarity(snapshot);
   if (yardPanelOpen) renderYardPanel(snapshot);
+  if (gardenPanelOpen) renderGardenPanel(snapshot);
   renderEnding(snapshot);
 
   document.body.dataset.phase = snapshot.phase;
@@ -355,6 +372,83 @@ function renderYardPanel(snapshot: HudSnapshot) {
     });
     hud.upgradeChoices.append(button);
   }
+
+  hud.seedChoices.replaceChildren();
+  for (const seed of SEED_DEFINITIONS) {
+    const count = snapshot.garden.inventory[seed.id];
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'upgrade-choice seed-choice';
+    button.disabled =
+      snapshot.yard.wood < seed.cost ||
+      snapshot.storyPhase !== 'morning-human';
+
+    const heading = document.createElement('strong');
+    heading.textContent = `${seed.name} 路 ${seed.cost} 预算`;
+    const effect = document.createElement('span');
+    effect.textContent = `库存 ${count}。${seed.growDays} 次浇水成熟，每天掉落${seed.foodName}。`;
+    button.append(heading, effect);
+    button.addEventListener('click', () => {
+      window.dispatchEvent(
+        new CustomEvent('chicken-life:buy-seed', { detail: { id: seed.id } }),
+      );
+    });
+    hud.seedChoices.append(button);
+  }
+}
+
+function renderGardenPanel(snapshot: HudSnapshot) {
+  const inventoryText = SEED_DEFINITIONS
+    .map((seed) => `${seed.name.replace('种子', '')} ×${snapshot.garden.inventory[seed.id]}`)
+    .join(' / ');
+  hud.gardenPanelSummary.textContent = `种子库存：${inventoryText}`;
+  hud.gardenPlotChoices.replaceChildren();
+
+  for (const plot of snapshot.garden.plots) {
+    const card = document.createElement('article');
+    card.className = 'garden-plot';
+    const title = document.createElement('strong');
+    title.textContent = gardenPlotLabel(plot);
+    const status = document.createElement('span');
+    status.textContent = gardenPlotStatus(plot);
+    card.append(title, status);
+
+    if (!plot.seed) {
+      const row = document.createElement('div');
+      row.className = 'seed-pick-row';
+      for (const seed of SEED_DEFINITIONS) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.disabled = snapshot.garden.inventory[seed.id] <= 0;
+        button.textContent = seed.name.replace('种子', '');
+        button.addEventListener('click', () => {
+          window.dispatchEvent(
+            new CustomEvent('chicken-life:plant-seed', {
+              detail: { plotId: plot.id, seed: seed.id },
+            }),
+          );
+          setGardenPanelOpen(false);
+        });
+        row.append(button);
+      }
+      card.append(row);
+    }
+
+    hud.gardenPlotChoices.append(card);
+  }
+}
+
+function gardenPlotLabel(plot: GardenPlot) {
+  if (plot.id === 'plot-left') return '左侧地块';
+  if (plot.id === 'plot-mid') return '中间地块';
+  return '右侧地块';
+}
+
+function gardenPlotStatus(plot: GardenPlot) {
+  if (!plot.seed) return '空地，可以种新的种子。';
+  const definition = seedDefinition(plot.seed as SeedType);
+  if (plot.mature) return `${definition.foodName}成熟了，每天会掉落一份食物。`;
+  return `${definition.foodName}生长 ${plot.growth}/${definition.growDays}，${plot.wateredToday ? '今天已浇水' : '今天还没浇水'}。`;
 }
 
 function setYardPanelOpen(open: boolean) {
@@ -367,6 +461,21 @@ function setYardPanelOpen(open: boolean) {
   if (open && latestSnapshot) {
     renderYardPanel(latestSnapshot);
     hud.yardPanelClose.focus();
+  } else {
+    appRoot.focus({ preventScroll: true });
+  }
+}
+
+function setGardenPanelOpen(open: boolean) {
+  if (open && (!latestSnapshot || latestSnapshot.requiresNaming || !hud.closeInteractionPanel.hidden)) {
+    return;
+  }
+  gardenPanelOpen = open;
+  hud.gardenPanel.hidden = !open;
+  window.dispatchEvent(new CustomEvent(open ? 'chicken-life:garden-panel-open' : 'chicken-life:garden-panel-close'));
+  if (open && latestSnapshot) {
+    renderGardenPanel(latestSnapshot);
+    hud.gardenPanelClose.focus();
   } else {
     appRoot.focus({ preventScroll: true });
   }
@@ -468,6 +577,8 @@ hud.continueFreePlay.addEventListener('click', () => {
 
 hud.debugClose.addEventListener('click', () => setDebugOpen(false));
 hud.yardPanelClose.addEventListener('click', () => setYardPanelOpen(false));
+hud.gardenPanelClose.addEventListener('click', () => setGardenPanelOpen(false));
+window.addEventListener('chicken-life:garden-open', () => setGardenPanelOpen(true));
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-debug]')) {
   button.addEventListener('click', () => dispatchDebug(button.dataset.debug ?? ''));
 }
@@ -484,6 +595,7 @@ window.addEventListener('keydown', (event) => {
   if (
     event.key === 'Tab' &&
     !yardPanelOpen &&
+    !gardenPanelOpen &&
     !event.ctrlKey &&
     !event.altKey &&
     !event.metaKey
@@ -495,6 +607,11 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && yardPanelOpen) {
     event.preventDefault();
     setYardPanelOpen(false);
+    return;
+  }
+  if (event.key === 'Escape' && gardenPanelOpen) {
+    event.preventDefault();
+    setGardenPanelOpen(false);
     return;
   }
   if (event.key === 'F1') {

@@ -18,6 +18,8 @@ import {
   createGameState,
   digHole,
   eatFood,
+  hugChicken,
+  petChicken,
   recordHumanLureSunflower,
   restInHole,
   servePremiumFeed,
@@ -25,7 +27,7 @@ import {
   updateIdleChickenWander,
   updateNightPressure,
 } from '../src/game/simulation/state';
-import { YARD_LAMP_POSITION } from '../src/game/content/yardUpgrades';
+import { WATER_BASIN_POSITION, YARD_LAMP_POSITION } from '../src/game/content/yardUpgrades';
 import {
   DAY_ACTIVE_SECONDS,
   DUSK_AT,
@@ -141,6 +143,10 @@ test('premium feed pieces visibly count as richer grain nutrition', () => {
   assert.equal(served.length, CORE_LOOP_TUNING.premiumFeedPieces);
   assert.ok(served.every((food) => food.type === 'grain' && food.fromKeeper));
 
+  state.mode = 'chicken';
+  state.phase = 'day';
+  state.flow.phase = 'chicken-day';
+
   for (const food of served) {
     eatFood(state, food);
   }
@@ -227,6 +233,17 @@ test('scratching the same place deepens a remembered cooling hole', () => {
   assert.equal(state.holes.length, 1);
 });
 
+test('cannot dig a hole next to the water basin', () => {
+  const state = createGameState();
+  state.weather = 'sunny';
+  state.yard.owned.push('water-basin');
+
+  const hole = digHole(state, { ...WATER_BASIN_POSITION });
+
+  assert.equal(hole, null);
+  assert.equal(state.holes.length, 0);
+});
+
 test('ordinary holes expire sooner while deep territory holes remain remembered', () => {
   const shallow = createGameState();
   shallow.weather = 'sunny';
@@ -302,6 +319,9 @@ test('ordinary holes cool quickly while deep holes cool faster', () => {
 
 test('food raises egg momentum at the slower tuned rate', () => {
   const state = createGameState();
+  state.mode = 'chicken';
+  state.phase = 'day';
+  state.flow.phase = 'chicken-day';
   state.nutrition = 0;
   const food = {
     id: 999,
@@ -319,6 +339,9 @@ test('food raises egg momentum at the slower tuned rate', () => {
 
 test('grass now matches grain nutrition', () => {
   const state = createGameState();
+  state.mode = 'chicken';
+  state.phase = 'day';
+  state.flow.phase = 'chicken-day';
   state.nutrition = 0;
   const food = {
     id: 1000,
@@ -361,4 +384,57 @@ test('five sunflower treats make the chicken follow the human briefly', () => {
 
   assert.equal(state.chickenWander.followSeconds, 0);
   assert.equal(state.chickenWander.followOffset, null);
+});
+
+test('daily affection caps at eight while sunflower affection caps at five', () => {
+  const state = createGameState();
+  state.mode = 'human';
+
+  for (let index = 0; index < 6; index += 1) {
+    const food = {
+      id: 3000 + index,
+      x: state.chicken.x,
+      y: state.chicken.y,
+      type: 'sunflower' as const,
+      visibleAt: 0,
+      fromHuman: true,
+    };
+    state.foods.push(food);
+    eatFood(state, food);
+  }
+
+  assert.equal(state.sunflowerAffectionGain, 5);
+  assert.equal(state.dailyAffectionGain, 5);
+
+  assert.equal(petChicken(state), true);
+  assert.equal(state.dailyAffectionGain, 7);
+
+  state.chickenWander.followSeconds = 10;
+  assert.equal(hugChicken(state), true);
+  assert.equal(state.dailyAffectionGain, 8);
+  assert.equal(state.sunflowerAffectionGain, 5);
+});
+
+test('morning human food does not count toward satiety', () => {
+  const state = createGameState();
+  state.mode = 'human';
+  state.phase = 'human';
+  state.flow.phase = 'morning-human';
+  state.nutrition = 0;
+
+  const food = {
+    id: 4000,
+    x: state.chicken.x,
+    y: state.chicken.y,
+    type: 'sunflower' as const,
+    visibleAt: 0,
+    fromHuman: true,
+  };
+  state.foods.push(food);
+
+  eatFood(state, food);
+
+  assert.equal(state.nutrition, 0);
+  assert.equal(state.eaten.sunflower, 0);
+  assert.equal(state.dailyAffectionGain, 1);
 });

@@ -88,6 +88,7 @@ test('legacy saves shift yard entity coordinates after upper map expansion', () 
   assert.equal(restored.foods[0].y, 720);
   assert.equal(restored.holes[0].y, 880);
   assert.equal(restored.animals[0].y, 800);
+  assert.equal(restored.animals[0].phase, 'watching');
   assert.equal(restored.weaselEncounter?.position.y, 920);
   assert.equal(restored.weaselEncounter?.target?.y, 860);
 });

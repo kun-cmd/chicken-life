@@ -6,7 +6,9 @@ import {
   createForagingState,
   foodPoolFor,
   foodPoolForFamiliarity,
+  leftTreeFoodCountForFamiliarity,
 } from '../src/game/systems/foraging';
+import { yardRegionFor } from '../src/game/systems/yardFamiliarity';
 
 test('natural food progression keeps sunflower seeds out of the yard pool', () => {
   const profile = createChickenProfile(1234);
@@ -56,7 +58,7 @@ test('familiarity food pool keeps low familiarity on the base pool', () => {
   );
 });
 
-test('familiarity food pool can reveal wild foods before day gates when abilities allow it', () => {
+test('familiarity food pool can reveal lower wild foods before day gates when abilities allow it', () => {
   const profile = createChickenProfile(1234);
   profile.awakenedAbilities.scratch = true;
   profile.awakenedAbilities.flutter = true;
@@ -66,7 +68,11 @@ test('familiarity food pool can reveal wild foods before day gates when abilitie
   assert.equal(pool.includes('cricket'), true);
   assert.equal(pool.includes('worm'), true);
   assert.equal(pool.includes('beetle'), true);
-  assert.equal(pool.includes('berry'), true);
+  assert.equal(pool.includes('berry'), false);
+  assert.equal(
+    foodPoolForFamiliarity({ profile, dusk: false, day: 7, familiarity: 80 }).includes('berry'),
+    true,
+  );
 });
 
 test('familiarity food pool still respects ability gates', () => {
@@ -109,8 +115,26 @@ test('left tree region only adds low yield bugs at high familiarity', () => {
     region: 'left-tree',
   });
 
-  assert.deepEqual(low, ['grain', 'grass']);
-  assert.deepEqual(high, ['grain', 'grass', 'cricket']);
+  assert.deepEqual(low, ['grain', 'grain', 'grass', 'grass', 'grass']);
+  assert.deepEqual(high, ['grain', 'grain', 'grass', 'grass', 'grass', 'cricket']);
+});
+
+test('left tree starts with four or five foods and grows with familiarity', () => {
+  assert.equal(leftTreeFoodCountForFamiliarity(0, 0.99), 4);
+  assert.equal(leftTreeFoodCountForFamiliarity(0, 0.2), 5);
+  assert.equal(leftTreeFoodCountForFamiliarity(25, 0.99), 5);
+  assert.equal(leftTreeFoodCountForFamiliarity(100, 0.99), 8);
+
+  const state = createGameState();
+  const initialLeftTreeFoods = state.foods.filter(
+    (food) => food.visibleAt === 0 && yardRegionFor(food) === 'left-tree',
+  );
+  assert.ok(initialLeftTreeFoods.length >= 4);
+  assert.ok(initialLeftTreeFoods.length <= 5);
+  assert.equal(
+    initialLeftTreeFoods.every((food) => food.type === 'grain' || food.type === 'grass'),
+    true,
+  );
 });
 
 test('upper wilds start with grass and crickets, then improve with familiarity', () => {

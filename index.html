@@ -106,7 +106,28 @@
         <div id="eggAlbumList" class="panel-list"></div>
         <h3>可购买道具</h3>
         <div id="upgradeChoices" class="upgrade-grid"></div>
+        <h3>种子</h3>
+        <div id="seedChoices" class="upgrade-grid seed-grid"></div>
         <p class="yard-panel__hint">Tab 打开 · Esc 关闭</p>
+      </section>
+
+      <section
+        id="gardenPanel"
+        class="garden-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gardenPanelTitle"
+        hidden
+      >
+        <div class="panel-head">
+          <div>
+            <span>种植区</span>
+            <h2 id="gardenPanelTitle">选择地块和种子</h2>
+          </div>
+          <button id="gardenPanelClose" type="button" aria-label="关闭种植面板">×</button>
+        </div>
+        <p id="gardenPanelSummary" class="yard-panel__wood">种子库存</p>
+        <div id="gardenPlotChoices" class="garden-plot-list"></div>
       </section>
 
       <div id="saveWarning" class="save-warning" role="status" hidden>
@@ -192,6 +213,7 @@
             <input id="masterVolume" type="range" min="0" max="100" step="1" value="70" />
             <b id="masterVolumeLabel">70%</b>
           </label>
+          <div id="debugMouse" class="debug-cursor">鼠标坐标：移入画面查看</div>
           <div id="debugFamiliarity" class="debug-familiarity"></div>
           <p>F1 开关调试，F2 补充木料，F3 跳黄昏，F4 生成黄鼠狼。</p>
         </section>
