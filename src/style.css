@@ -1192,6 +1192,12 @@ body[data-mode='human'] .today-plate {
   font-size: 12px;
 }
 
+.debug-cursor {
+  padding: 6px 0 2px;
+  color: rgba(255, 246, 214, 0.82);
+  font-size: 12px;
+}
+
 .debug-familiarity strong {
   color: white;
   font-size: 12px;
@@ -1373,7 +1379,8 @@ body[data-phase='night'] #game {
   }
 }
 
-.yard-panel {
+.yard-panel,
+.garden-panel {
   position: fixed;
   top: 50%;
   right: 18px;
@@ -1393,16 +1400,19 @@ body[data-phase='night'] #game {
   pointer-events: auto;
 }
 
-.yard-panel .panel-head {
+.yard-panel .panel-head,
+.garden-panel .panel-head {
   align-items: flex-start;
 }
 
-.yard-panel .panel-head h2 {
+.yard-panel .panel-head h2,
+.garden-panel .panel-head h2 {
   margin: 3px 0 0;
   font-size: 20px;
 }
 
-.yard-panel .panel-head button {
+.yard-panel .panel-head button,
+.garden-panel .panel-head button {
   width: 38px;
   height: 38px;
   color: var(--cream);
@@ -1411,7 +1421,8 @@ body[data-phase='night'] #game {
   border-radius: 10px;
 }
 
-.yard-panel h3 {
+.yard-panel h3,
+.garden-panel h3 {
   margin: 18px 0 8px;
   color: #f2d78f;
   font-size: 14px;
@@ -1485,6 +1496,52 @@ body[data-phase='night'] #game {
   border-color: rgba(227, 193, 127, 0.28);
 }
 
+.garden-panel {
+  right: 430px;
+  width: min(360px, calc(100vw - 36px));
+}
+
+.garden-plot-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.garden-plot {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  color: var(--cream);
+  background: rgba(81, 111, 65, 0.18);
+  border: 1px solid rgba(178, 211, 132, 0.2);
+  border-radius: 11px;
+}
+
+.garden-plot > span {
+  color: rgba(244, 231, 190, 0.72);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.seed-pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.seed-pick-row button {
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--cream);
+  background: rgba(227, 193, 127, 0.14);
+  border: 1px solid rgba(227, 193, 127, 0.28);
+  border-radius: 8px;
+}
+
+.seed-pick-row button:disabled {
+  opacity: 0.4;
+}
+
 .yard-panel__hint {
   margin: 14px 0 0;
   color: rgba(244, 231, 190, 0.5);
@@ -1493,7 +1550,8 @@ body[data-phase='night'] #game {
 }
 
 @media (max-width: 720px) {
-  .yard-panel {
+  .yard-panel,
+  .garden-panel {
     top: 12px;
     right: 12px;
     left: 12px;

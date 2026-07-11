@@ -32,6 +32,7 @@ import {
   PREMIUM_FEED_POSITION,
   WATER_BASIN_POSITION,
   YARD_LAMP_POSITION,
+  YARD_SPEAKER_POSITION,
   YARD_UPGRADES,
   isYardUpgradeId,
   type YardUpgradeId,
@@ -59,6 +60,7 @@ import {
   applyCloseInteraction,
   applyFlowEvent,
   buildHudSnapshot,
+  buyGardenSeed,
   canRetryFinale,
   chickenSprintScaleForHeat,
   cluckAt,
@@ -74,17 +76,22 @@ import {
   digHole,
   drinkAtWaterSource,
   dryRainSoakedChicken,
+  eatGardenPlant,
   recordHumanLureSunflower,
   expireFoods,
   finishChickenNight,
+  hugChicken,
   improveCoopAbility,
   isFoodLockedByAnimal,
   isNearLight,
   isShadowy,
   peckFood,
+  petChicken,
+  plantGardenSeed,
   repairCoop,
   refillForagingFoods,
   refillWaterBasin,
+  refuseInjuredTouch,
   recoverStamina,
   restockEdibleFoods,
   restInHole,
@@ -94,6 +101,7 @@ import {
   revealBuriedNightBug,
   setChickenName,
   servePremiumFeed,
+  sootheInjuredChicken,
   spawnScratchWorm,
   spendStamina,
   updateAnimals,
@@ -102,6 +110,7 @@ import {
   updateWaterBoost,
   updateWeatherExposure,
   updateIdleChickenWander,
+  waterGardenPlot,
   visibleFoods,
 } from '../../game/simulation/state';
 import type { FoodEntity, HoleEntity, Vec2, YardAnimal } from '../../game/simulation/state';
@@ -116,6 +125,7 @@ import {
   buyUpgrade,
   ownedFacilityAt,
   startFacilityActivity,
+  toggleYardSpeaker,
 } from '../../game/systems/yardUpgrades';
 import {
   movementFamiliarityScale,
@@ -127,6 +137,30 @@ import {
   isHumanBlocking,
   updateWeaselEncounter as advanceWeaselEncounter,
 } from '../../game/systems/weaselEncounter';
+import {
+  BASKETBALL_GRAVITY,
+  BASKETBALL_HOOP_BASE,
+  BASKETBALL_HOOP_RIM,
+  BASKETBALL_BACKBOARD,
+  BASKETBALL_RADIUS,
+  advanceBasketball,
+  basketballThrowDirection,
+  basketballThrowVelocity,
+  holdBasketball,
+  kickBasketball,
+  syncHeldBasketball,
+  throwBasketball,
+} from '../../game/systems/basketball';
+import {
+  GARDEN_PLOTS,
+  SEED_DEFINITIONS,
+  gardenPlotById,
+  isGardenPlotId,
+  isSeedType,
+  seedDefinition,
+  type GardenPlot,
+  type SeedType,
+} from '../../game/systems/garden';
 
 type FoodView = Phaser.GameObjects.Image & { foodId: number };
 type AnimalView = Phaser.GameObjects.Image & { animalId: number; animalType: YardAnimal['type'] };
@@ -146,18 +180,44 @@ const NIGHT_BGM_KEY = 'bgm-night';
 const DEFAULT_MASTER_VOLUME = 0.7;
 const DAY_BGM_VOLUME = 0.36;
 const NIGHT_BGM_VOLUME = 0.42;
+const SPEAKER_MUSIC_VOLUME = 0.16;
+const SPEAKER_BEAT_SECONDS = 0.22;
+const SPEAKER_MELODY = [392, 523.25, 466.16, 659.25, 349.23, 523.25, 587.33, 466.16] as const;
 const SFX_PECK_KEY = 'sfx-peck';
 const SFX_DIG_KEY = 'sfx-dig';
 const SFX_DRINK_KEY = 'sfx-drink';
 const SFX_REWARD_KEY = 'sfx-reward';
 const SFX_UPGRADE_KEY = 'sfx-upgrade';
 const SFX_NIGHT_RUSTLE_KEY = 'sfx-night-rustle';
-const HUMAN_LURE_SEED_DURATION = 0.18;
+const HUMAN_LURE_SEED_DURATION = 0.45;
 const CHICKEN_WALK_MOVE_EPSILON = 0.04;
 const CHICKEN_WALK_TELEPORT_DISTANCE = 28;
 const HOLE_REST_RADIUS = 36;
 const CLOSE_INTERACTION_RANGE = 74;
 const EGG_PICKUP_RANGE = 76;
+const HUMAN_CHICKEN_PET_DURATION = 0.82;
+const HUMAN_CHICKEN_HUG_DURATION = 1.16;
+
+type HumanChickenInteraction = {
+  kind: 'pet' | 'hug' | 'soothe';
+  elapsed: number;
+  duration: number;
+  side: number;
+};
+type SpeakerMusicState = {
+  context: AudioContext;
+  gain: GainNode;
+  nextBeatAt: number;
+  step: number;
+  ownsContext: boolean;
+};
+type ConfettiParticle = Vec2 & {
+  vx: number;
+  vy: number;
+  life: number;
+  ttl: number;
+  color: number;
+};
 const EGG_SHAPE_REVEAL_RANGE = 112;
 const EGG_SHAPE_ALPHA = 0.68;
 const CLOSE_INTERACTION_DURATION = 4800;
@@ -224,6 +284,14 @@ export class GameScene extends Phaser.Scene {
   private weatherOverlay!: Phaser.GameObjects.Graphics;
   private rainView!: Phaser.GameObjects.Graphics;
   private chickenBodyFx!: Phaser.GameObjects.Graphics;
+  private danceFloorFx!: Phaser.GameObjects.Graphics;
+  private gardenGraphics!: Phaser.GameObjects.Graphics;
+  private basketballHoopFx!: Phaser.GameObjects.Graphics;
+  private basketballShadowFx!: Phaser.GameObjects.Graphics;
+  private basketballTrajectoryFx!: Phaser.GameObjects.Graphics;
+  private basketballConfettiFx!: Phaser.GameObjects.Graphics;
+  private humanChickenInteractionFx!: Phaser.GameObjects.Graphics;
+  private basketball!: Phaser.GameObjects.Image;
   private foodViews = new Map<number, FoodView>();
   private holeViews = new Map<number, Phaser.GameObjects.Graphics>();
   private animalViews = new Map<number, AnimalView>();
@@ -251,9 +319,15 @@ export class GameScene extends Phaser.Scene {
   private rustleSfxCooldown = 0;
   private nightAmbienceCooldown = 0;
   private humanFacingDirection: Vec2 = { x: 0, y: 1 };
+  private chickenFacingDirection: Vec2 = { x: 1, y: 0 };
+  private humanChickenInteraction: HumanChickenInteraction | null = null;
   private chickenLiftTimer = 0;
   private chickenWalkPhase = 0;
   private chickenWalkBlend = 0;
+  private yardMusicSeconds = 0;
+  private basketballAimSeconds = 0;
+  private basketballSpaceWasHeld = false;
+  private confettiParticles: ConfettiParticle[] = [];
   private lastChickenPosition: Vec2 | null = null;
   private duskCollection = createDuskCollectionState();
   private lastSavedAt = 0;
@@ -261,6 +335,7 @@ export class GameScene extends Phaser.Scene {
   private dayMusic: Phaser.Sound.BaseSound | null = null;
   private nightMusic: Phaser.Sound.BaseSound | null = null;
   private activeMusic: 'day' | 'night' | null = null;
+  private speakerMusic: SpeakerMusicState | null = null;
   private musicUnlocked = false;
   private masterVolume = loadSavedMasterVolume();
   private recentCluckSfx: string[] = [];
@@ -268,6 +343,7 @@ export class GameScene extends Phaser.Scene {
   private closeInteractionAnimating = false;
   private closeInteractionTimer: Phaser.Time.TimerEvent | null = null;
   private yardPanelOpen = false;
+  private gardenPanelOpen = false;
   private finaleRetryOpen = false;
 
   private handleGameplayKeyDown = (event: KeyboardEvent) => {
@@ -406,6 +482,35 @@ export class GameScene extends Phaser.Scene {
         ? `${upgrade.name}放好了，也已经装满清水。`
         : `${upgrade.name}准备好了，院子里多了一处新变化。`;
     this.emitHud(true, true);
+  };
+
+  private handleBuySeed = (event: Event) => {
+    const id = (event as CustomEvent<{ id?: unknown }>).detail?.id;
+    if (!isSeedType(id)) return;
+    if (buyGardenSeed(this.state, id)) {
+      this.playSfx(SFX_UPGRADE_KEY, 0.44);
+    }
+    this.emitHud(true, true);
+  };
+
+  private handlePlantSeed = (event: Event) => {
+    const detail = (event as CustomEvent<{ plotId?: unknown; seed?: unknown }>).detail;
+    if (!isGardenPlotId(detail?.plotId) || !isSeedType(detail?.seed)) return;
+    if (plantGardenSeed(this.state, detail.plotId, detail.seed)) {
+      this.drawGarden();
+      this.playSfx(SFX_DIG_KEY, 0.36);
+    }
+    this.emitHud(true, true);
+  };
+
+  private handleGardenPanelOpen = () => {
+    this.gardenPanelOpen = true;
+    this.resetGameplayKeys();
+  };
+
+  private handleGardenPanelClose = () => {
+    this.gardenPanelOpen = false;
+    this.resetGameplayKeys();
   };
 
   constructor() {
@@ -561,6 +666,18 @@ export class GameScene extends Phaser.Scene {
     this.applyMasterVolume();
   };
 
+  private handlePointerMove = (pointer: Phaser.Input.Pointer) => {
+    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    window.dispatchEvent(
+      new CustomEvent('chicken-life:pointer-world', {
+        detail: {
+          x: Math.round(world.x),
+          y: Math.round(world.y),
+        },
+      }),
+    );
+  };
+
   create() {
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.cameras.main.setZoom(BASE_CAMERA_ZOOM);
@@ -570,14 +687,24 @@ export class GameScene extends Phaser.Scene {
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
     this.createGeneratedTextures();
     this.drawYard();
+    this.gardenGraphics = this.add.graphics().setDepth(34);
+    this.drawGarden();
     this.yardUpgradeGraphics = this.add.graphics().setDepth(36);
     this.drawOwnedYardUpgrades();
+    this.basketballHoopFx = this.add.graphics().setDepth(57);
+    this.basketballShadowFx = this.add.graphics().setDepth(58);
+    this.basketballTrajectoryFx = this.add.graphics().setDepth(76);
+    this.basketballConfettiFx = this.add.graphics().setDepth(99);
+    this.drawBasketballHoop();
     this.createFoodViews();
     this.createHoleViews();
     this.chicken = this.createChickenSprite(this.state.chicken);
     this.chickenBodyFx = this.add.graphics().setDepth(66);
+    this.danceFloorFx = this.add.graphics().setDepth(61);
+    this.humanChickenInteractionFx = this.add.graphics().setDepth(79);
     this.human = this.createHumanSprite(this.state.human);
     this.human.setVisible(false);
+    this.basketball = this.add.image(this.state.basketball.x, this.state.basketball.y, 'basketball').setDepth(67);
     this.keeper = this.createKeeperSprite(this.state.keeper);
     this.weasel = this.createWeaselSprite(this.state.weasel);
     this.weatherOverlay = this.add.graphics().setDepth(94);
@@ -592,8 +719,13 @@ export class GameScene extends Phaser.Scene {
     window.addEventListener('chicken-life:yard-panel-open', this.handleYardPanelOpen);
     window.addEventListener('chicken-life:yard-panel-close', this.handleYardPanelClose);
     window.addEventListener('chicken-life:buy-upgrade', this.handleBuyUpgrade);
+    window.addEventListener('chicken-life:buy-seed', this.handleBuySeed);
+    window.addEventListener('chicken-life:plant-seed', this.handlePlantSeed);
+    window.addEventListener('chicken-life:garden-panel-open', this.handleGardenPanelOpen);
+    window.addEventListener('chicken-life:garden-panel-close', this.handleGardenPanelClose);
     window.addEventListener('chicken-life:finale-retry', this.handleFinaleRetry);
     window.addEventListener('chicken-life:ending-continue', this.handleEndingContinue);
+    this.input.on('pointermove', this.handlePointerMove);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('chicken-life:debug', this.handleDebugEvent);
       window.removeEventListener('chicken-life:volume', this.handleVolumeEvent);
@@ -602,6 +734,10 @@ export class GameScene extends Phaser.Scene {
       window.removeEventListener('chicken-life:yard-panel-open', this.handleYardPanelOpen);
       window.removeEventListener('chicken-life:yard-panel-close', this.handleYardPanelClose);
       window.removeEventListener('chicken-life:buy-upgrade', this.handleBuyUpgrade);
+      window.removeEventListener('chicken-life:buy-seed', this.handleBuySeed);
+      window.removeEventListener('chicken-life:plant-seed', this.handlePlantSeed);
+      window.removeEventListener('chicken-life:garden-panel-open', this.handleGardenPanelOpen);
+      window.removeEventListener('chicken-life:garden-panel-close', this.handleGardenPanelClose);
       window.removeEventListener('chicken-life:finale-retry', this.handleFinaleRetry);
       window.removeEventListener('chicken-life:ending-continue', this.handleEndingContinue);
       window.removeEventListener('keydown', this.handleMusicUnlock);
@@ -610,8 +746,10 @@ export class GameScene extends Phaser.Scene {
       window.removeEventListener('blur', this.resetGameplayKeys);
       document.removeEventListener('visibilitychange', this.handleVisibilityChange);
       this.input.off('pointerdown', this.handleMusicUnlock);
+      this.input.off('pointermove', this.handlePointerMove);
       this.dayMusic?.stop();
       this.nightMusic?.stop();
+      this.stopSpeakerMusic();
       this.closeInteractionTimer?.remove(false);
     });
     this.applySceneViewFromState();
@@ -628,11 +766,12 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (this.closeInteractionOpen || this.yardPanelOpen || this.finaleRetryOpen) {
+    if (this.closeInteractionOpen || this.yardPanelOpen || this.gardenPanelOpen || this.finaleRetryOpen) {
       this.resetGameplayKeys();
       this.updateSprites(0);
       this.updateWeatherView(time);
       this.updateMusic();
+      this.updateSpeakerMusic();
       return;
     }
 
@@ -653,6 +792,7 @@ export class GameScene extends Phaser.Scene {
     this.drinkSfxCooldown = Math.max(0, this.drinkSfxCooldown - dt);
     this.caughtCooldown = Math.max(0, this.caughtCooldown - dt);
     this.chickenLiftTimer = Math.max(0, this.chickenLiftTimer - dt);
+    this.advanceHumanChickenInteraction(dt);
 
     const storyPhase = this.state.flow.phase;
     if (
@@ -669,11 +809,15 @@ export class GameScene extends Phaser.Scene {
       this.updateChicken(dt, actions);
     }
 
+    this.updateBasketball(dt);
+    updateAnimals(this.state, dt);
+    this.syncAnimalViews();
     this.updateAmbientNightCues(dt);
     this.updateSprites(dt);
     this.updateWeatherView(time);
     this.updateNightVeil(time);
     this.updateMusic();
+    this.updateSpeakerMusic();
 
     if (time - this.lastHudAt > 240) {
       this.emitHud();
@@ -702,12 +846,14 @@ export class GameScene extends Phaser.Scene {
     const down =
       downPressed || this.keyboardState.isDown('ArrowDown') || this.keyboardState.isDown('KeyS');
     const spacePressed = this.keyboardState.consumePress('Space');
+    const spaceHeld = this.keyboardState.isDown('Space');
     const enterPressed = this.keyboardState.consumePress('Enter');
     const interactPressed = this.keyboardState.consumePress('KeyE');
     return {
       x: (right ? 1 : 0) - (left ? 1 : 0),
       y: (down ? 1 : 0) - (up ? 1 : 0),
       spacePressed,
+      spaceHeld,
       enterPressed,
       sprintHeld: this.keyboardState.isDown('ShiftLeft') || this.keyboardState.isDown('ShiftRight'),
       peckPressed: spacePressed,
@@ -813,14 +959,16 @@ export class GameScene extends Phaser.Scene {
         ? this.state.body.sprintMultiplier * chickenSprintScaleForHeat(this.state)
         : 1) *
       (isOnPath(this.state.chicken) ? 1.06 : 1) *
-      movementFamiliarityScale(this.state.yardFamiliarity, this.state.chicken);
+      movementFamiliarityScale(this.state.yardFamiliarity, this.state.chicken) *
+      (this.state.chickenInjury === 'untreated' ? 0.9 : 1);
 
     if (hasMove) {
+      this.chickenFacingDirection = direction;
       const target = {
         x: this.state.chicken.x + direction.x * speed * dt,
         y: this.state.chicken.y + direction.y * speed * dt,
       };
-      if (!isBlocked(target, 18)) {
+      if (!isBlocked(target, 18) && !this.catBlocksPoint(target)) {
         this.state.chicken = target;
         actionSeconds += dt * (canSprint ? 1.25 : 0.78);
       }
@@ -886,15 +1034,13 @@ export class GameScene extends Phaser.Scene {
           actionSeconds,
           this.state.flow.day,
         );
-        if (explored.canShowTip) {
+        if (explored.canShowTip && explored.region) {
           const tipMsgs: Record<string, string> = {
-            'left-tree': '鸡在树影边停了一下，警惕地四处张望。',
-            'planting-zone': '鸡绕着规整的泥地看了看，还没弄明白这片地。',
+            'left-tree': '鸡在左下树荫边停了一下，警惕地四处张望。',
+            'right-bottom': '鸡绕着右下区看了看，还没弄明白这片地。',
             'upper-wilds': '鸡走到更陌生的上方野地，伸长脖子听草里的动静。',
-            'coop-yard': '鸡在鸡舍附近踱步，不时回头看看。',
-            'outer-growth': '鸡钻进杂草丛，小心翼翼地探路。',
-            'main-path': '鸡在小路上站定，确认四周安全。',
-            'house-yard': '鸡靠近屋子，谨慎地打量着这片区域。',
+            'left-middle': '鸡走进左中区，低头辨认草里的气味。',
+            'right-middle': '鸡走进右中区，小心地沿着草边探路。',
           };
           const tip = tipMsgs[explored.region];
           if (tip && !this.state.message) {
@@ -954,6 +1100,156 @@ export class GameScene extends Phaser.Scene {
       this.updateChickenPressure(actionSeconds);
     }
     if (this.updateRealtimeThreats(dt)) return;
+  }
+
+  private updateBasketball(dt: number) {
+    const ball = this.state.basketball;
+    if (ball.heldBy === 'human') {
+      syncHeldBasketball(ball, this.state.human, this.humanFacingDirection);
+      this.syncBasketballView();
+      this.updateBasketballConfetti(dt);
+      return;
+    }
+
+    if (
+      this.state.mode === 'chicken' &&
+      ball.z <= 6 &&
+      Math.hypot(ball.vx, ball.vy) < 150 &&
+      distance(this.state.chicken, ball) < BASKETBALL_RADIUS + 24
+    ) {
+      if (kickBasketball(ball, this.chickenFacingDirection)) {
+        this.state.message = '鸡一脚把篮球踢得咕噜噜滚了出去。';
+      }
+    }
+
+    const result = advanceBasketball(ball, dt, BLOCKERS);
+    if (result.bounced) this.cameras.main.shake(45, 0.0012);
+    if (result.scored) {
+      this.state.message = '篮球稳稳进框，院子里炸开一小阵礼炮。';
+      this.showBasketballScoreFx();
+      this.emitHud(true, true);
+    }
+    this.syncBasketballView();
+    this.updateBasketballConfetti(dt);
+  }
+
+  private updateHumanBasketball(dt: number, actions: InputActions) {
+    const ball = this.state.basketball;
+    if (ball.heldBy === 'human') {
+      syncHeldBasketball(ball, this.state.human, this.humanFacingDirection);
+      if (actions.spaceHeld) {
+        this.basketballAimSeconds = Math.min(1.45, this.basketballAimSeconds + dt);
+        this.basketballSpaceWasHeld = true;
+        this.drawBasketballTrajectory();
+        return true;
+      }
+      this.basketballTrajectoryFx.clear();
+      if (this.basketballSpaceWasHeld && this.basketballAimSeconds > 0.18) {
+        throwBasketball(ball, this.humanFacingDirection, this.basketballAimSeconds);
+        this.state.message = '你瞄准后把篮球投了出去。';
+        this.playSfx(SFX_UPGRADE_KEY, 0.36);
+        this.basketballAimSeconds = 0;
+        this.basketballSpaceWasHeld = false;
+        return true;
+      }
+      this.basketballAimSeconds = 0;
+      this.basketballSpaceWasHeld = false;
+      return false;
+    }
+
+    this.basketballAimSeconds = 0;
+    this.basketballSpaceWasHeld = false;
+    this.basketballTrajectoryFx.clear();
+    if (actions.spacePressed && ball.z <= 12 && distance(this.state.human, ball) < 58) {
+      holdBasketball(ball);
+      syncHeldBasketball(ball, this.state.human, this.humanFacingDirection);
+      this.state.message = '你拿起篮球，轻轻拍了两下。长按空格可以瞄准投篮。';
+      return true;
+    }
+    return false;
+  }
+
+  private drawBasketballTrajectory() {
+    const g = this.basketballTrajectoryFx;
+    if (!g) return;
+    g.clear();
+
+    const start = this.state.basketball;
+    const direction = basketballThrowDirection(start, this.humanFacingDirection);
+    const { speed, lift } = basketballThrowVelocity(this.basketballAimSeconds);
+    const flightSeconds =
+      (lift + Math.sqrt(lift * lift + 2 * BASKETBALL_GRAVITY * 26)) / BASKETBALL_GRAVITY;
+    const previewSeconds = flightSeconds / 3;
+    const steps = 18;
+    g.lineStyle(4, 0xfff0aa, 0.66);
+    g.beginPath();
+    let moved = false;
+    for (let i = 0; i <= steps; i += 1) {
+      const t = (previewSeconds * i) / steps;
+      const z = 26 + lift * t - (BASKETBALL_GRAVITY * t * t) / 2;
+      const x = start.x + direction.x * speed * t;
+      const y = start.y + direction.y * speed * t - Math.max(0, z);
+      if (!moved) {
+        g.moveTo(x, y);
+        moved = true;
+      } else {
+        g.lineTo(x, y);
+      }
+    }
+    g.strokePath();
+  }
+
+  private syncBasketballView() {
+    if (!this.basketball) return;
+    const ball = this.state.basketball;
+    const heldBounce =
+      ball.heldBy === 'human' && this.basketballAimSeconds <= 0
+        ? Math.abs(Math.sin(this.time.now / 115)) * 18
+        : 0;
+    const displayZ = Math.max(ball.z, heldBounce);
+    this.basketball.setPosition(ball.x, ball.y - displayZ);
+    this.basketball.setScale(1 + displayZ * 0.004);
+    this.basketball.rotation += (ball.vx * 0.0009 + ball.vy * 0.0004) || (ball.heldBy ? 0.08 : 0);
+    this.basketballShadowFx.clear();
+    const alpha = Phaser.Math.Clamp(0.28 - displayZ * 0.0017, 0.08, 0.28);
+    this.basketballShadowFx.fillStyle(0x11110e, alpha).fillEllipse(ball.x, ball.y + 7, 38, 13);
+  }
+
+  private showBasketballScoreFx() {
+    const colors = [0xffd36a, 0x8ed6ff, 0xff9ac2, 0xc8f27a] as const;
+    for (let i = 0; i < 34; i += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 80 + Math.random() * 210;
+      const ttl = 0.9 + Math.random() * 0.45;
+      this.confettiParticles.push({
+        x: BASKETBALL_HOOP_RIM.x,
+        y: BASKETBALL_HOOP_RIM.y - 24,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 80,
+        life: ttl,
+        ttl,
+        color: colors[i % colors.length],
+      });
+    }
+  }
+
+  private updateBasketballConfetti(dt: number) {
+    const g = this.basketballConfettiFx;
+    if (!g) return;
+    g.clear();
+    this.confettiParticles = this.confettiParticles
+      .map((particle) => ({
+        ...particle,
+        x: particle.x + particle.vx * dt,
+        y: particle.y + particle.vy * dt,
+        vy: particle.vy + 250 * dt,
+        life: particle.life - dt,
+      }))
+      .filter((particle) => particle.life > 0);
+    for (const particle of this.confettiParticles) {
+      g.fillStyle(particle.color, Phaser.Math.Clamp(particle.life / particle.ttl, 0, 1));
+      g.fillRect(particle.x - 3, particle.y - 3, 6, 6);
+    }
   }
 
   private updateChickenPressure(dt: number) {
@@ -1162,12 +1458,40 @@ export class GameScene extends Phaser.Scene {
         }
         this.peckCooldown = food.type === 'sunflower' ? 0.18 : 0.26;
       } else {
+        const gardenPlot = this.nearestGardenPlot(this.state.chicken, 44);
+        if (gardenPlot?.seed && gardenPlot.mature) {
+          if (eatGardenPlant(this.state, gardenPlot.id)) {
+            this.drawGarden();
+            this.playSfx(SFX_PECK_KEY, 0.42);
+            this.showPeckFx({
+              id: -1,
+              type: 'grass',
+              x: gardenPlot.x,
+              y: gardenPlot.y,
+              visibleAt: this.state.time,
+            });
+          }
+          this.peckCooldown = 0.3;
+          actionSeconds += 1.15;
+          pausedOtherMovementSeconds += 1.15;
+          heatFreeActionSeconds += 1.15;
+          return {
+            actionSeconds,
+            diggingSeconds,
+            huntingSeconds,
+            pausedOtherMovementSeconds,
+            heatFreeActionSeconds,
+          };
+        }
         const result = cluckAt(this.state, this.state.chicken);
         for (const droppedFood of result.droppedFoods) {
           this.foodViews.set(droppedFood.id, this.createFoodView(droppedFood));
           this.showScatterFx(droppedFood);
         }
-        this.showCluckFx(this.state.chicken, result.scaredIds.length);
+        this.showCluckFx(
+          this.state.chicken,
+          result.scaredIds.length + result.reactedCatIds.length,
+        );
         this.scareAnimalViews(result.scaredIds);
         this.peckCooldown = 0.32;
         actionSeconds += 0.85;
@@ -1304,8 +1628,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateHuman(dt: number, actions: InputActions) {
+    this.expireAndSyncFoods();
+
+    if (this.humanChickenInteraction) {
+      this.updateEggGuidance(dt);
+      return;
+    }
+
     const direction = normalize(actions.x, actions.y);
-    if (direction.x || direction.y) {
+    const basketballAiming = this.state.basketball.heldBy === 'human' && actions.spaceHeld;
+    if ((direction.x || direction.y) && !basketballAiming) {
       this.humanFacingDirection = direction;
       const target = {
         x: this.state.human.x + direction.x * 175 * dt,
@@ -1359,6 +1691,27 @@ export class GameScene extends Phaser.Scene {
     if (!handledLureChicken) updateIdleChickenWander(this.state, dt);
     this.updateEggGuidance(dt);
 
+    if (this.updateHumanBasketball(dt, actions)) return;
+
+    if (
+      actions.interactPressed &&
+      this.state.yard.owned.includes('yard-speaker') &&
+      distance(this.state.human, YARD_SPEAKER_POSITION) < 88
+    ) {
+      const speakerOn = toggleYardSpeaker(this.state.yard);
+      this.state.message = speakerOn
+        ? '旧音箱开始播放小院节拍。'
+        : '你按下旧音箱，院子重新安静下来。';
+      if (speakerOn) {
+        this.playSfx(SFX_UPGRADE_KEY, 0.32);
+      } else {
+        this.stopSpeakerMusic();
+      }
+      this.drawOwnedYardUpgrades();
+      this.emitHud(true, true);
+      return;
+    }
+
     if (
       actions.interactPressed &&
       this.state.yard.owned.includes('water-basin') &&
@@ -1405,10 +1758,6 @@ export class GameScene extends Phaser.Scene {
           this.revealEgg();
           this.clearEggClueView();
           return;
-        } else {
-          this.state.message = `这里没有蛋；${this.state.profile.name}抬起头，朝藏蛋的方向叫了两声。`;
-          this.showEggDirectionClue();
-          return;
         }
       } else if (actions.spacePressed && eggDistance < EGG_PICKUP_RANGE) {
         collectEgg(this.state);
@@ -1420,16 +1769,34 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    if (actions.spacePressed && this.tryHandleGardenSpace()) return;
+
     if (this.state.flow.phase === 'morning-human' && actions.spacePressed) {
       if (this.placeHumanLureSeed()) return;
     }
 
     if (actions.interactPressed) {
       if (distance(this.state.human, this.state.chicken) < CLOSE_INTERACTION_RANGE) {
-        if (dryRainSoakedChicken(this.state)) {
+        if (sootheInjuredChicken(this.state)) {
+          this.startHumanChickenInteraction('soothe');
+          this.playSfx(SFX_REWARD_KEY, 0.52);
+          this.showHeartFx(this.state.chicken);
+        } else if (refuseInjuredTouch(this.state)) {
+          this.playCluckSfx(1);
+          this.showCluckFx(this.state.chicken, 1);
+        } else if (dryRainSoakedChicken(this.state)) {
           this.playSfx(SFX_REWARD_KEY, 0.58);
+        } else if (this.state.chickenWander.followSeconds > 0) {
+          if (hugChicken(this.state)) {
+            this.startHumanChickenInteraction('hug');
+            this.playSfx(SFX_REWARD_KEY, 0.54);
+            this.showHeartFx(this.state.chicken);
+          }
         } else {
-          this.openCloseInteraction();
+          if (petChicken(this.state)) {
+            this.startHumanChickenInteraction('pet');
+            this.playSfx(SFX_REWARD_KEY, 0.44);
+          }
         }
       } else if (nearCoop) {
         if (repairCoop(this.state)) {
@@ -1438,10 +1805,45 @@ export class GameScene extends Phaser.Scene {
           this.playCloseMoment();
         }
       } else {
-        this.state.message = '靠近鸡可以手喂和陪伴；靠近鸡窝可以用木料修缮。';
+        this.state.message = '靠近鸡可以摸羽毛或抱起；靠近鸡窝可以用木料修缮。';
       }
     }
 
+  }
+
+  private tryHandleGardenSpace() {
+    const nearbyPlot = this.nearestGardenPlot(this.state.human, 58);
+    if (nearbyPlot?.seed && !nearbyPlot.mature) {
+      if (waterGardenPlot(this.state, nearbyPlot.id)) {
+        this.drawGarden();
+        this.playSfx(SFX_DRINK_KEY, 0.32);
+      }
+      this.emitHud(true, true);
+      return true;
+    }
+
+    const bedCenter = {
+      x: PLANTING_BED.x + PLANTING_BED.width * 0.5,
+      y: PLANTING_BED.y + PLANTING_BED.height * 0.5,
+    };
+    if (distance(this.state.human, bedCenter) < 130) {
+      window.dispatchEvent(new CustomEvent('chicken-life:garden-open'));
+      return true;
+    }
+    return false;
+  }
+
+  private nearestGardenPlot(point: Vec2, radius: number) {
+    let best: GardenPlot | null = null;
+    let bestDistance = radius;
+    for (const plot of this.state.garden.plots) {
+      const plotDistance = distance(point, plot);
+      if (plotDistance < bestDistance) {
+        best = plot;
+        bestDistance = plotDistance;
+      }
+    }
+    return best;
   }
 
   private placeHumanLureSeed() {
@@ -1607,7 +2009,10 @@ export class GameScene extends Phaser.Scene {
     this.eggView = null;
     this.createFoodViews();
     this.createHoleViews();
+    this.drawGarden();
     this.drawOwnedYardUpgrades();
+    this.drawBasketballHoop();
+    this.syncBasketballView();
     this.applySceneViewFromState();
   }
 
@@ -1660,6 +2065,13 @@ export class GameScene extends Phaser.Scene {
 
   private applyMasterVolume() {
     this.sound.volume = this.masterVolume;
+    if (this.speakerMusic) {
+      this.speakerMusic.gain.gain.setTargetAtTime(
+        SPEAKER_MUSIC_VOLUME * this.masterVolume,
+        this.speakerMusic.context.currentTime,
+        0.04,
+      );
+    }
   }
 
   private handleMusicUnlock = () => {
@@ -1679,6 +2091,99 @@ export class GameScene extends Phaser.Scene {
     previousTrack?.stop();
     if (nextTrack && !nextTrack.isPlaying) nextTrack.play();
     this.activeMusic = nextTrack?.isPlaying ? desired : null;
+  }
+
+  private updateSpeakerMusic() {
+    if (!this.musicUnlocked || !this.isYardMusicPlaying()) {
+      this.stopSpeakerMusic();
+      return;
+    }
+
+    const music = this.ensureSpeakerMusic();
+    if (!music) return;
+    if (music.context.state === 'suspended') void music.context.resume();
+
+    const now = music.context.currentTime;
+    if (music.nextBeatAt < now) music.nextBeatAt = now + 0.02;
+    while (music.nextBeatAt < now + 0.16) {
+      this.scheduleSpeakerBeat(music, music.step, music.nextBeatAt);
+      music.step = (music.step + 1) % SPEAKER_MELODY.length;
+      music.nextBeatAt += SPEAKER_BEAT_SECONDS;
+    }
+  }
+
+  private ensureSpeakerMusic() {
+    if (this.speakerMusic) return this.speakerMusic;
+    const webAudioManager = this.sound as Phaser.Sound.WebAudioSoundManager;
+    const context = webAudioManager.context ?? this.createStandaloneAudioContext();
+    if (!context) return null;
+
+    const gain = context.createGain();
+    gain.gain.value = SPEAKER_MUSIC_VOLUME * this.masterVolume;
+    gain.connect(context.destination);
+    this.speakerMusic = {
+      context,
+      gain,
+      nextBeatAt: context.currentTime + 0.02,
+      step: 0,
+      ownsContext: webAudioManager.context !== context,
+    };
+    return this.speakerMusic;
+  }
+
+  private createStandaloneAudioContext() {
+    const AudioContextCtor =
+      window.AudioContext ??
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    return AudioContextCtor ? new AudioContextCtor() : null;
+  }
+
+  private scheduleSpeakerBeat(music: SpeakerMusicState, step: number, startAt: number) {
+    const note = SPEAKER_MELODY[step];
+    const accent = step % 4 === 0 ? 1 : 0.72;
+    const tone = music.context.createOscillator();
+    const envelope = music.context.createGain();
+
+    tone.type = step % 4 === 0 ? 'square' : 'triangle';
+    tone.frequency.setValueAtTime(note, startAt);
+    if (step % 3 === 0) tone.frequency.exponentialRampToValueAtTime(note * 1.18, startAt + 0.035);
+    envelope.gain.setValueAtTime(0.0001, startAt);
+    envelope.gain.exponentialRampToValueAtTime(0.09 * accent, startAt + 0.012);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.12);
+    tone.connect(envelope).connect(music.gain);
+    tone.start(startAt);
+    tone.stop(startAt + 0.13);
+    tone.onended = () => {
+      tone.disconnect();
+      envelope.disconnect();
+    };
+
+    if (step % 4 !== 0) return;
+    const bass = music.context.createOscillator();
+    const bassEnvelope = music.context.createGain();
+    bass.type = 'sine';
+    bass.frequency.setValueAtTime(note / 3, startAt);
+    bassEnvelope.gain.setValueAtTime(0.0001, startAt);
+    bassEnvelope.gain.exponentialRampToValueAtTime(0.1, startAt + 0.01);
+    bassEnvelope.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.16);
+    bass.connect(bassEnvelope).connect(music.gain);
+    bass.start(startAt);
+    bass.stop(startAt + 0.18);
+    bass.onended = () => {
+      bass.disconnect();
+      bassEnvelope.disconnect();
+    };
+  }
+
+  private stopSpeakerMusic() {
+    if (!this.speakerMusic) return;
+    const music = this.speakerMusic;
+    music.gain.gain.setTargetAtTime(0.0001, music.context.currentTime, 0.03);
+    window.setTimeout(() => {
+      music.gain.disconnect();
+      if (music.ownsContext) void music.context.close();
+    }, 120);
+    this.speakerMusic = null;
   }
 
   private playSfx(key: string, volume = 0.5) {
@@ -1796,6 +2301,17 @@ export class GameScene extends Phaser.Scene {
 
   private isScratchableGround(point: Vec2) {
     return !isOnPath(point) && !isBlocked(point, 18);
+  }
+
+  private catBlocksPoint(point: Vec2) {
+    return this.state.animals.some(
+      (animal) =>
+        animal.active &&
+        animal.type === 'cat' &&
+        animal.catPersonality === 'lounger' &&
+        animal.phase === 'sleeping' &&
+        distance(point, animal) < 62,
+    );
   }
 
   private nearestBuriedNightBug(radius: number) {
@@ -2097,19 +2613,29 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(0x7f472b, 1).fillEllipse(80, 28, 22, 18);
       g.fillStyle(0xffe3a2, 1).fillCircle(86, 23, 2.5);
     });
+    this.generateTexture('basketball', 44, 44, (g) => {
+      g.fillStyle(0xd46d22, 1).fillCircle(22, 22, 18);
+      g.lineStyle(3, 0x3a1b10, 0.82).strokeCircle(22, 22, 18);
+      g.lineStyle(2, 0x3a1b10, 0.7);
+      g.lineBetween(4, 22, 40, 22);
+      g.lineBetween(22, 4, 22, 40);
+      g.beginPath();
+      g.arc(22, 22, 12, -Math.PI / 2, Math.PI / 2);
+      g.strokePath();
+      g.beginPath();
+      g.arc(22, 22, 12, Math.PI / 2, Math.PI * 1.5);
+      g.strokePath();
+      g.fillStyle(0xffa03a, 0.32).fillCircle(15, 14, 6);
+    });
     this.generateTexture('hole', 64, 44, (g) => {
       g.fillStyle(0x9b7048, 0.42).fillEllipse(32, 20, 54, 30);
       g.fillStyle(0x2f2119, 0.72).fillEllipse(32, 22, 46, 28);
     });
-    this.generateTexture('animal-cat', 108, 70, (g) => {
-      g.fillStyle(0x0f140f, 0.22).fillEllipse(50, 50, 62, 14);
-      g.fillStyle(0x6f665a, 1).fillEllipse(16, 39, 34, 10);
-      g.fillStyle(0x887b69, 1).fillEllipse(50, 36, 58, 24);
-      g.fillStyle(0x9a8a75, 1).fillCircle(80, 31, 15);
-      g.fillStyle(0x756b60, 1).fillTriangle(71, 18, 78, 0, 85, 18);
-      g.fillTriangle(85, 18, 92, 0, 99, 18);
-      g.fillStyle(0x5f574e, 0.5).fillRect(55, 27, 28, 3);
-    });
+    this.generateCatTexture('animal-cat-watcher', 'watcher');
+    this.generateCatTexture('animal-cat-lounger', 'lounger');
+    this.generateCatTexture('animal-cat-bold-kitten', 'bold-kitten');
+    this.generateCatTexture('animal-cat-shy-kitten', 'shy-kitten');
+    this.generateCatTexture('animal-cat', 'watcher');
     this.generateTexture('animal-sparrow', 56, 44, (g) => {
       g.fillStyle(0x0f140f, 0.18).fillEllipse(28, 34, 28, 8);
       g.fillStyle(0xffe4a3, 0.1).fillCircle(28, 22, 24);
@@ -2119,6 +2645,20 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(0x9a7549, 1).fillCircle(38, 18, 7);
       g.fillStyle(0xe2a13f, 1).fillTriangle(45, 18, 52, 22, 45, 26);
       g.fillStyle(0x17120d, 1).fillCircle(40, 15, 1.5);
+    });
+    this.generateTexture('animal-sparrow-front', 42, 54, (g) => {
+      g.fillStyle(0x0f140f, 0.14).fillEllipse(21, 45, 22, 7);
+      g.lineStyle(2, 0x5f432b, 1);
+      g.lineBetween(17, 37, 14, 46);
+      g.lineBetween(25, 37, 28, 46);
+      g.fillStyle(0x8b6540, 1).fillEllipse(21, 28, 22, 26);
+      g.fillStyle(0x6a4c32, 0.92).fillEllipse(12, 29, 9, 22);
+      g.fillEllipse(30, 29, 9, 22);
+      g.fillStyle(0x9a7549, 1).fillCircle(21, 15, 10);
+      g.fillStyle(0xffe4a3, 0.16).fillCircle(21, 22, 16);
+      g.fillStyle(0x17120d, 1).fillCircle(17, 13, 1.4);
+      g.fillCircle(25, 13, 1.4);
+      g.fillStyle(0xe2a13f, 1).fillTriangle(18, 17, 24, 17, 21, 22);
     });
     this.generateTexture('food-grain', 32, 32, (g) => g.fillStyle(0xffd86a, 1).fillEllipse(16, 16, 10, 6));
     this.generateTexture('food-premium-grain', 42, 36, (g) => {
@@ -2186,6 +2726,20 @@ export class GameScene extends Phaser.Scene {
       g.fillCircle(22, 26, 7);
       g.fillStyle(0x5e8b47, 1).fillTriangle(18, 14, 25, 5, 29, 15);
     });
+    this.generateTexture('food-chive', 44, 42, (g) => {
+      g.lineStyle(4, 0x76bd58, 1);
+      g.lineBetween(12, 34, 18, 9);
+      g.lineBetween(21, 35, 24, 7);
+      g.lineBetween(30, 34, 35, 11);
+      g.lineStyle(2, 0xb7e084, 0.85).lineBetween(24, 36, 30, 14);
+    });
+    this.generateTexture('food-cucumber', 52, 34, (g) => {
+      g.fillStyle(0x5cae62, 1).fillRoundedRect(8, 11, 36, 13, 7);
+      g.fillStyle(0x92d47a, 0.8).fillRoundedRect(12, 14, 26, 4, 3);
+      g.fillStyle(0x2f7a45, 0.75).fillCircle(14, 17, 2);
+      g.fillCircle(28, 16, 2);
+      g.fillCircle(38, 18, 2);
+    });
     this.generateTexture('food-nightBug', 36, 36, (g) => {
       g.fillStyle(0x7aa7ff, 0.45).fillCircle(18, 18, 8);
       g.fillStyle(0x9fc7ff, 1).fillEllipse(18, 18, 12, 8);
@@ -2231,6 +2785,61 @@ export class GameScene extends Phaser.Scene {
     draw(g);
     g.generateTexture(key, width, height);
     g.destroy();
+  }
+
+  private generateCatTexture(
+    key: string,
+    coat: NonNullable<YardAnimal['catPersonality']>,
+  ) {
+    const orange = 0xd98232;
+    const deepOrange = 0xa94f20;
+    const white = 0xfff1d8;
+    const ink = 0x3b2519;
+
+    this.generateTexture(key, 108, 70, (g) => {
+      g.fillStyle(0x0f140f, 0.2).fillEllipse(50, 51, 64, 14);
+
+      const orangeBase = coat === 'lounger' || coat === 'shy-kitten';
+      const base = orangeBase ? orange : white;
+      g.fillStyle(base, 1).fillEllipse(16, 39, 34, 10);
+      g.fillEllipse(50, 36, 58, 24);
+      g.fillCircle(80, 31, 15);
+      g.fillTriangle(71, 18, 78, 0, 85, 18);
+      g.fillTriangle(85, 18, 92, 0, 99, 18);
+
+      if (coat === 'watcher') {
+        g.fillStyle(orange, 1).fillEllipse(43, 30, 40, 15);
+        g.fillEllipse(17, 38, 22, 7);
+        g.fillStyle(deepOrange, 0.92).fillEllipse(80, 24, 18, 9);
+        g.fillStyle(white, 1).fillEllipse(84, 36, 17, 10);
+      } else if (coat === 'lounger') {
+        g.fillStyle(white, 1).fillEllipse(51, 42, 38, 11);
+        g.fillEllipse(84, 35, 18, 11);
+        g.fillEllipse(9, 39, 13, 7);
+        g.fillStyle(deepOrange, 0.9).fillEllipse(48, 29, 22, 8);
+      } else if (coat === 'bold-kitten') {
+        g.fillStyle(orange, 1).fillEllipse(34, 32, 20, 15);
+        g.fillEllipse(58, 38, 17, 12);
+        g.fillEllipse(16, 38, 18, 7);
+        g.fillCircle(80, 25, 12);
+        g.fillTriangle(71, 18, 78, 0, 85, 18);
+        g.fillTriangle(85, 18, 92, 0, 99, 18);
+        g.fillStyle(white, 1).fillEllipse(82, 36, 16, 9);
+      } else {
+        g.fillStyle(white, 1).fillEllipse(66, 38, 22, 19);
+        g.fillEllipse(80, 31, 8, 24);
+        g.fillEllipse(92, 36, 10, 8);
+        g.fillEllipse(31, 44, 13, 6);
+        g.fillStyle(deepOrange, 0.92).fillEllipse(18, 37, 17, 6);
+      }
+
+      g.fillStyle(ink, 1).fillCircle(84, 28, 2);
+      g.fillStyle(0xd56e62, 1).fillTriangle(92, 33, 96, 35, 92, 37);
+      g.lineStyle(1.5, ink, 0.55);
+      g.lineBetween(91, 36, 102, 33);
+      g.lineBetween(91, 38, 102, 40);
+      g.lineBetween(69, 26, 58, 25);
+    });
   }
 
   private drawYard() {
@@ -2281,6 +2890,65 @@ export class GameScene extends Phaser.Scene {
     this.add.image(0, 0, key).setOrigin(0).setDepth(0);
   }
 
+  private drawGarden() {
+    if (!this.gardenGraphics) return;
+    const g = this.gardenGraphics;
+    g.clear();
+
+    for (const plot of this.state.garden.plots) {
+      g.fillStyle(plot.wateredToday ? 0x5f4430 : 0x7a5638, 1).fillRoundedRect(plot.x - 20, plot.y - 30, 40, 60, 8);
+      g.lineStyle(2, plot.seed ? 0xd4b36c : 0xa47b4f, 0.72).strokeRoundedRect(plot.x - 20, plot.y - 30, 40, 60, 8);
+      if (!plot.seed) {
+        g.lineStyle(2, 0x342619, 0.28).lineBetween(plot.x - 12, plot.y, plot.x + 12, plot.y);
+        continue;
+      }
+
+      const definition = seedDefinition(plot.seed);
+      const ratio = plot.mature ? 1 : plot.growth / definition.growDays;
+      const stemHeight = 16 + ratio * 24;
+      const leafColor = plot.seed === 'cucumber' ? 0x4f9f5f : plot.seed === 'sunflower' ? 0xa8a845 : 0x65b85c;
+      g.lineStyle(4, 0x3f7e43, 0.95).lineBetween(plot.x, plot.y + 18, plot.x, plot.y + 18 - stemHeight);
+      g.fillStyle(leafColor, 0.95).fillEllipse(plot.x - 8, plot.y + 4 - stemHeight * 0.45, 16, 8);
+      g.fillEllipse(plot.x + 9, plot.y - 4 - stemHeight * 0.32, 17, 8);
+      if (plot.mature) {
+        if (plot.seed === 'sunflower') {
+          g.fillStyle(0xf1c94b, 1).fillCircle(plot.x, plot.y + 18 - stemHeight - 3, 10);
+          g.fillStyle(0x5a3420, 1).fillCircle(plot.x, plot.y + 18 - stemHeight - 3, 5);
+        } else if (plot.seed === 'cucumber') {
+          g.fillStyle(0x7fcf77, 1).fillRoundedRect(plot.x - 16, plot.y - 15, 32, 10, 5);
+        } else {
+          g.lineStyle(3, 0x8bd06b, 1);
+          g.lineBetween(plot.x - 9, plot.y + 12, plot.x - 3, plot.y - 23);
+          g.lineBetween(plot.x + 4, plot.y + 13, plot.x + 12, plot.y - 20);
+        }
+      }
+    }
+  }
+
+  private drawBasketballHoop() {
+    if (!this.basketballHoopFx) return;
+    const g = this.basketballHoopFx;
+    g.clear();
+    const base = BASKETBALL_HOOP_BASE;
+    const rim = BASKETBALL_HOOP_RIM;
+    const board = BASKETBALL_BACKBOARD;
+    g.lineStyle(8, 0x3b3f45, 1).lineBetween(
+      base.x,
+      base.y + 54,
+      base.x,
+      board.y + board.height + 6,
+    );
+    g.fillStyle(0xe8edf0, 0.96).fillRoundedRect(board.x, board.y, board.width, board.height, 5);
+    g.lineStyle(2, 0x8a9aa2, 0.72).strokeRoundedRect(board.x + 3, board.y + 12, board.width - 6, 36, 4);
+    g.lineStyle(5, 0xe96e38, 1).strokeEllipse(rim.x, rim.y, 58, 30);
+    g.lineStyle(2, 0xf6d5b7, 0.72);
+    for (let i = -2; i <= 2; i += 1) {
+      g.lineBetween(rim.x - 24 + i * 10, rim.y + 10, rim.x - 10 + i * 8, rim.y + 45);
+      g.lineBetween(rim.x + 24 - i * 10, rim.y + 10, rim.x + 10 - i * 8, rim.y + 45);
+    }
+    g.fillStyle(0x24272c, 0.22).fillEllipse(base.x + 4, base.y + 60, 58, 14);
+  }
+
   private drawOwnedYardUpgrades() {
     if (!this.yardUpgradeGraphics) return;
     const g = this.yardUpgradeGraphics;
@@ -2327,6 +2995,17 @@ export class GameScene extends Phaser.Scene {
         g.lineStyle(7, 0x49382d, 1).lineBetween(x, y + 52, x, y - 38);
         g.fillStyle(0xe7b85f, 1).fillCircle(x, y - 45, 13);
         g.fillStyle(0xffe6a4, 0.85).fillCircle(x, y - 47, 7);
+      } else if (id === 'yard-speaker') {
+        g.fillStyle(0x2f3336, 1).fillRoundedRect(x - 34, y - 34, 68, 68, 8);
+        g.fillStyle(0x4f5c62, 1).fillRoundedRect(x - 24, y - 44, 48, 14, 5);
+        g.fillStyle(0x151819, 1).fillCircle(x, y - 8, 18);
+        g.fillStyle(0xb4c7c4, 0.72).fillCircle(x, y - 8, 9);
+        g.fillStyle(0x151819, 1).fillCircle(x, y + 22, 11);
+        g.lineStyle(3, 0xf2d58a, 0.68).strokeCircle(x, y - 8, 26);
+        if (this.state.yard.speakerOn) {
+          g.lineStyle(3, 0x9ad9ff, 0.72).strokeCircle(x, y - 8, 36);
+          g.lineStyle(2, 0xffe29a, 0.48).strokeCircle(x, y - 8, 47);
+        }
       } else if (id === 'door-latch') {
         g.fillStyle(0xb9ad92, 1).fillRoundedRect(x - 22, y - 5, 44, 10, 3);
         g.fillStyle(0x665e51, 1).fillCircle(x - 24, y, 7);
@@ -2519,7 +3198,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private syncAnimalViews() {
-    const activeAnimals = this.state.mode === 'chicken' ? this.state.animals.filter((animal) => animal.active) : [];
+    const activeAnimals = this.state.animals.filter(
+      (animal) => animal.active && (animal.type === 'cat' || this.state.mode === 'chicken'),
+    );
     const activeIds = new Set(activeAnimals.map((animal) => animal.id));
 
     for (const [id, view] of this.animalViews) {
@@ -2537,7 +3218,20 @@ export class GameScene extends Phaser.Scene {
       }
       view.setPosition(animal.x, animal.y);
       view.setVisible(true);
-      view.scaleX = animal.facing;
+      if (animal.type === 'sparrow' && animal.perch === 'left-tree') {
+        view.setTexture('animal-sparrow-front');
+        view.setScale(1, 1);
+        view.clearTint();
+      } else if (animal.type === 'cat') {
+        const scale = animal.catRole === 'kitten' ? 0.62 : 1;
+        view.setTexture(this.catTextureKey(animal));
+        view.setScale(scale * animal.facing, scale);
+        view.clearTint();
+      } else {
+        view.setTexture('animal-sparrow');
+        view.setScale(animal.facing, 1);
+        view.clearTint();
+      }
     }
   }
 
@@ -2547,11 +3241,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createAnimalView(animal: YardAnimal): AnimalView {
-    const key = animal.type === 'cat' ? 'animal-cat' : 'animal-sparrow';
+    const key = animal.type === 'cat' ? this.catTextureKey(animal) : 'animal-sparrow';
     const view = this.add.image(animal.x, animal.y, key).setDepth(animal.type === 'cat' ? 52 : 64) as AnimalView;
     view.animalId = animal.id;
     view.animalType = animal.type;
     return view;
+  }
+
+  private catTextureKey(animal: YardAnimal) {
+    if (animal.catPersonality === 'lounger') return 'animal-cat-lounger';
+    if (animal.catPersonality === 'bold-kitten') return 'animal-cat-bold-kitten';
+    if (animal.catPersonality === 'shy-kitten') return 'animal-cat-shy-kitten';
+    return 'animal-cat-watcher';
   }
 
   private scareAnimalViews(ids: number[]) {
@@ -2658,7 +3359,19 @@ export class GameScene extends Phaser.Scene {
     const glow = this.add.circle(0, 0, golden ? 30 : 26, golden ? 0xffd75a : 0xfff1b8, golden ? 0.36 : 0.22);
     const egg = this.add.ellipse(0, 0, 22, 30, golden ? 0xffc928 : 0xfff2c7);
     const mark = this.add.ellipse(4, -6, 6, 9, golden ? 0xffef92 : 0xe8c982, 0.72);
-    this.eggView = this.add.container(this.state.egg.x, this.state.egg.y, [glow, egg, mark]).setDepth(45);
+    const parts: Phaser.GameObjects.GameObject[] = [glow, egg, mark];
+    if (this.state.egg.name === '受惊蛋') {
+      const crack = this.add.graphics();
+      crack.lineStyle(2, 0x9a7548, 0.9);
+      crack.beginPath();
+      crack.moveTo(2, -12);
+      crack.lineTo(-2, -5);
+      crack.lineTo(3, -1);
+      crack.lineTo(-1, 7);
+      crack.strokePath();
+      parts.push(crack);
+    }
+    this.eggView = this.add.container(this.state.egg.x, this.state.egg.y, parts).setDepth(45);
     this.eggView.setVisible(visible);
   }
 
@@ -2812,6 +3525,171 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  private startHumanChickenInteraction(kind: HumanChickenInteraction['kind']) {
+    const dx = this.state.chicken.x - this.state.human.x;
+    const fallback = this.humanFacingDirection.x || 1;
+    const side = Math.abs(dx) > 4 ? Math.sign(dx) : Math.sign(fallback) || 1;
+    this.humanChickenInteraction = {
+      kind,
+      elapsed: 0,
+      duration:
+        kind === 'hug'
+          ? HUMAN_CHICKEN_HUG_DURATION
+          : kind === 'soothe'
+            ? 1.48
+            : HUMAN_CHICKEN_PET_DURATION,
+      side,
+    };
+    this.humanFacingDirection = { x: side, y: 0 };
+    this.state.chickenWander.facing = -side;
+    this.humanChickenInteractionFx.clear();
+  }
+
+  private advanceHumanChickenInteraction(dt: number) {
+    if (!this.humanChickenInteraction) return;
+    this.humanChickenInteraction.elapsed += dt;
+    if (this.humanChickenInteraction.elapsed < this.humanChickenInteraction.duration) return;
+    this.humanChickenInteraction = null;
+    this.humanChickenInteractionFx.clear();
+    this.human.rotation = 0;
+  }
+
+  private humanChickenInteractionProgress() {
+    const interaction = this.humanChickenInteraction;
+    if (!interaction) return 0;
+    return Phaser.Math.Clamp(interaction.elapsed / interaction.duration, 0, 1);
+  }
+
+  private humanChickenInteractionHold() {
+    const p = this.humanChickenInteractionProgress();
+    if (p <= 0) return 0;
+    if (p < 0.24) return smoothStep(p / 0.24);
+    if (p > 0.78) return smoothStep((1 - p) / 0.22);
+    return 1;
+  }
+
+  private applyHumanChickenInteractionChickenPose(baseFacing: number) {
+    const interaction = this.humanChickenInteraction;
+    if (!interaction) return;
+
+    const p = this.humanChickenInteractionProgress();
+    const side = interaction.side;
+    const chickenFacing = -side || baseFacing;
+
+    if (interaction.kind === 'pet') {
+      const contact = Math.sin(p * Math.PI);
+      const stroke = Math.sin(p * Math.PI * 4);
+      this.chicken.setPosition(
+        this.state.chicken.x + side * stroke * 1.8,
+        this.chicken.y - contact * 3,
+      );
+      this.chicken.setScale(chickenFacing * (1 + contact * 0.07), 1 - contact * 0.06);
+      this.chicken.rotation += chickenFacing * stroke * 0.045;
+      return;
+    }
+
+    const hold = this.humanChickenInteractionHold();
+    const cuddle = Math.sin(p * Math.PI * 5) * 2.2 * hold;
+    const heldX = Phaser.Math.Linear(this.state.chicken.x, this.state.human.x + side * 24, hold);
+    const heldY = Phaser.Math.Linear(this.chicken.y, this.state.human.y - 30, hold) + cuddle;
+    this.chicken.setPosition(heldX, heldY);
+    this.chicken.setScale(chickenFacing * (1 - hold * 0.14), 1 + hold * 0.06);
+    this.chicken.rotation = -side * 0.1 * hold + Math.sin(p * Math.PI * 5) * 0.035 * hold;
+  }
+
+  private drawHumanChickenInteractionFx() {
+    const fx = this.humanChickenInteractionFx;
+    if (!fx) return;
+    fx.clear();
+
+    const interaction = this.humanChickenInteraction;
+    if (!interaction || this.state.mode !== 'human') return;
+
+    const p = this.humanChickenInteractionProgress();
+    const side = interaction.side;
+    const shoulder = {
+      x: this.human.x + side * 14,
+      y: this.human.y - 28,
+    };
+
+    if (interaction.kind === 'pet') {
+      const reach = smoothStep(Phaser.Math.Clamp(p / 0.22, 0, 1));
+      const retract = smoothStep(Phaser.Math.Clamp((p - 0.68) / 0.32, 0, 1));
+      const extension = reach * (1 - retract);
+      const sweep = Math.sin(p * Math.PI * 4) * 10 * side;
+      const target = {
+        x: this.state.chicken.x - side * 20 + sweep,
+        y: this.state.chicken.y - 24 + Math.sin(p * Math.PI * 3) * 2,
+      };
+      const hand = {
+        x: Phaser.Math.Linear(shoulder.x, target.x, extension),
+        y: Phaser.Math.Linear(shoulder.y, target.y, extension),
+      };
+      fx.lineStyle(7, 0xe6bd88, 0.92).lineBetween(shoulder.x, shoulder.y, hand.x, hand.y);
+      fx.fillStyle(0xe6bd88, 1).fillCircle(hand.x, hand.y, 5.5);
+
+      if (extension > 0.35) {
+        fx.lineStyle(2, 0xfff7d7, 0.55 + Math.sin(p * Math.PI) * 0.3);
+        for (let i = 0; i < 4; i += 1) {
+          const y = this.state.chicken.y - 34 + i * 5;
+          const x = this.state.chicken.x - side * (20 - i * 2);
+          fx.lineBetween(x, y, x + side * (12 + i * 2), y - 3);
+        }
+      }
+      return;
+    }
+
+    const hold = this.humanChickenInteractionHold();
+    if (hold <= 0.02) return;
+
+    const chest = {
+      x: this.human.x + side * 10,
+      y: this.human.y - 18,
+    };
+    const chickenCenter = {
+      x: this.chicken.x,
+      y: this.chicken.y,
+    };
+    const backHand = {
+      x: chickenCenter.x - side * 18,
+      y: chickenCenter.y - 6,
+    };
+    const frontHand = {
+      x: chickenCenter.x + side * 14,
+      y: chickenCenter.y + 10,
+    };
+
+    fx.lineStyle(8, 0xe6bd88, 0.92 * hold).lineBetween(
+      shoulder.x,
+      shoulder.y,
+      backHand.x,
+      backHand.y,
+    );
+    fx.lineStyle(8, 0xe6bd88, 0.86 * hold).lineBetween(
+      chest.x,
+      chest.y,
+      frontHand.x,
+      frontHand.y,
+    );
+    fx.fillStyle(0xe6bd88, 0.95 * hold).fillCircle(backHand.x, backHand.y, 5.5);
+    fx.fillCircle(frontHand.x, frontHand.y, 5.5);
+    if (interaction.kind === 'soothe') {
+      fx.fillStyle(0xfff3d2, 0.92 * hold).fillRoundedRect(
+        chickenCenter.x - 12,
+        chickenCenter.y - 7,
+        25,
+        14,
+        3,
+      );
+      fx.lineStyle(2, 0xd6b879, 0.72 * hold).lineBetween(
+        chickenCenter.x - 8,
+        chickenCenter.y + 4,
+        chickenCenter.x + 9,
+        chickenCenter.y - 4,
+      );
+    }
+  }
+
   private updateSprites(dt = 1 / 60) {
     const lift = this.chickenLiftTimer > 0 ? -Math.sin((this.chickenLiftTimer / 0.85) * Math.PI) * 24 : 0;
     const movedDistance = this.lastChickenPosition ? distance(this.state.chicken, this.lastChickenPosition) : 0;
@@ -2843,6 +3721,8 @@ export class GameScene extends Phaser.Scene {
     const step = Math.abs(stride) * this.chickenWalkBlend;
     const bob = step * 3.8;
     const squash = step * 0.045;
+    const yardMusic = this.isYardMusicPlaying();
+    this.yardMusicSeconds = yardMusic ? this.yardMusicSeconds + dt : 0;
 
     this.chicken.setPosition(this.state.chicken.x, this.state.chicken.y + lift - bob);
     this.chicken.setScale(facing * (1 + squash * 0.55), 1 - squash);
@@ -2875,11 +3755,41 @@ export class GameScene extends Phaser.Scene {
         this.chicken.rotation += Math.sin(this.time.now / 140) * 0.025;
       } else if (this.isChickenVisiblyWet()) {
         this.chicken.setScale(facing * 0.98, 0.92);
+      } else if (this.state.chickenInjury !== 'none') {
+        this.chicken.setScale(facing * 1.02, 0.88);
+        this.chicken.rotation = facing * -0.045 + Math.sin(this.time.now / 420) * 0.018;
       }
     }
+    if (
+      yardMusic &&
+      !facilityActivity &&
+      this.state.mode === 'chicken' &&
+      this.state.chickenInjury === 'none'
+    ) {
+      const beat = this.time.now / 250;
+      const danceIn = smoothStep((this.yardMusicSeconds - 0.65) / 1.05);
+      const puzzled = 1 - smoothStep(this.yardMusicSeconds / 1.15);
+      const hop = Math.max(0, Math.sin(beat)) * 13 * danceIn;
+      const headTilt = Math.sin(this.time.now / 520) * (0.18 * puzzled + 0.08 * danceIn);
+      this.chicken.setPosition(this.state.chicken.x, this.state.chicken.y - hop);
+      this.chicken.setScale(facing * (1 + hop * 0.006), 1 - hop * 0.004);
+      this.chicken.rotation = headTilt + Math.sin(beat * 0.5) * 0.04 * danceIn;
+    }
     this.updateChickenBodyVisual(facilityActivity);
+    this.applyHumanChickenInteractionChickenPose(facing);
     this.lastChickenPosition = { ...this.state.chicken };
-    this.human.setPosition(this.state.human.x, this.state.human.y);
+    const hugHold =
+      this.humanChickenInteraction?.kind === 'hug' ||
+      this.humanChickenInteraction?.kind === 'soothe'
+      ? this.humanChickenInteractionHold()
+      : 0;
+    const humanSide = this.humanChickenInteraction?.side ?? 0;
+    this.human.setPosition(this.state.human.x - humanSide * 4 * hugHold, this.state.human.y);
+    this.human.rotation = humanSide * 0.025 * hugHold;
+    if (this.humanChickenInteraction) {
+      this.human.scaleX = humanSide;
+    }
+    this.drawHumanChickenInteractionFx();
     const showEscortLantern =
       this.state.mode === 'human' && this.state.flow.phase === 'dusk-human';
     const showLureVision =
@@ -2917,6 +3827,53 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.weasel.setVisible(false);
     }
+    this.updateAnimalDanceViews(yardMusic);
+    this.drawDanceFloorFx(yardMusic);
+    this.syncBasketballView();
+  }
+
+  private isYardMusicPlaying() {
+    return (
+      this.state.yard.owned.includes('yard-speaker') &&
+      this.state.yard.speakerOn &&
+      this.state.flow.phase !== 'chicken-night'
+    );
+  }
+
+  private updateAnimalDanceViews(active: boolean) {
+    if (!active) {
+      for (const view of this.animalViews.values()) view.rotation = 0;
+      return;
+    }
+    const beat = this.time.now / 250;
+    for (const [id, view] of this.animalViews) {
+      const animal = this.state.animals.find((entry) => entry.id === id);
+      if (!animal) continue;
+      const hop = animal.type === 'sparrow' ? Math.max(0, Math.sin(beat + id)) * 10 : 0;
+      view.setPosition(animal.x, animal.y - hop);
+      if (animal.type === 'sparrow') view.rotation = Math.sin(beat + id) * 0.14;
+      if (animal.type === 'cat') view.rotation = Math.sin(beat * 0.25) * 0.025;
+    }
+  }
+
+  private drawDanceFloorFx(active: boolean) {
+    if (!this.danceFloorFx) return;
+    const g = this.danceFloorFx;
+    g.clear();
+    if (!active) return;
+
+    const pulse = (Math.sin(this.time.now / 250) + 1) / 2;
+    const center = YARD_SPEAKER_POSITION;
+    const colors = [0xffe29a, 0x9ad9ff, 0xf5a6cf] as const;
+    for (let i = 0; i < colors.length; i += 1) {
+      const angle = -0.7 + i * 0.7 + Math.sin(this.time.now / 900 + i) * 0.12;
+      const length = 150 + pulse * 28;
+      const x = center.x + Math.cos(angle) * length;
+      const y = center.y - 108 + Math.sin(angle) * 54;
+      g.lineStyle(8, colors[i], 0.16).lineBetween(center.x, center.y - 42, x, y);
+      g.fillStyle(colors[i], 0.18).fillCircle(x, y, 20 + pulse * 8);
+    }
+    g.lineStyle(3, 0xfff0b0, 0.24 + pulse * 0.12).strokeCircle(center.x, center.y - 6, 58 + pulse * 8);
   }
 
   private isChickenVisiblyWet() {
@@ -2937,6 +3894,8 @@ export class GameScene extends Phaser.Scene {
     const hot = this.state.heat;
     if (wet) {
       this.chicken.setTint(0xbfd7d9);
+    } else if (this.state.chickenInjury !== 'none') {
+      this.chicken.setTint(0xe1d2b8);
     } else if (hot >= 78) {
       this.chicken.setTint(0xffc08a);
     } else if (hot >= 56) {
@@ -2968,6 +3927,24 @@ export class GameScene extends Phaser.Scene {
         const dx = -20 + i * 13;
         const drop = (now / 180 + i * 9) % 16;
         this.chickenBodyFx.fillEllipse(x + dx, y - 22 + drop, 4, 8);
+      }
+    }
+
+    if (this.state.chickenInjury !== 'none' && !this.humanChickenInteraction) {
+      const side = this.state.mode === 'human' ? this.state.chickenWander.facing : this.chicken.scaleX >= 0 ? 1 : -1;
+      if (this.state.chickenInjury === 'recovering') {
+        const bandageX = x - side * 8;
+        this.chickenBodyFx.fillStyle(0xfff0cf, 0.96).fillRoundedRect(bandageX - 10, y - 15, 22, 9, 2);
+        this.chickenBodyFx.lineStyle(2, 0xc49e63, 0.72).lineBetween(
+          bandageX - 7,
+          y - 10,
+          bandageX + 8,
+          y - 14,
+        );
+      } else {
+        this.chickenBodyFx.lineStyle(2, 0xe8cf9b, 0.72);
+        this.chickenBodyFx.lineBetween(x - side * 25, y - 19, x - side * 37, y - 25);
+        this.chickenBodyFx.lineBetween(x - side * 23, y - 10, x - side * 35, y - 8);
       }
     }
 
@@ -3383,6 +4360,11 @@ function isTouchOptionOrNull(value: unknown): value is TouchOption | null {
 
 function isHuntingFood(type: FoodEntity['type']) {
   return type === 'cricket' || type === 'beetle' || type === 'nightBug';
+}
+
+function smoothStep(value: number) {
+  const t = Phaser.Math.Clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
 }
 
 function isHumanLureFood(food: FoodEntity) {

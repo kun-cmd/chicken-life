@@ -5,6 +5,7 @@ export interface YardUpgradeState {
   wood: number;
   pendingWood: number;
   owned: YardUpgradeId[];
+  speakerOn: boolean;
 }
 
 export type FacilityId = Extract<YardUpgradeId, 'shade-shelter' | 'low-perch'>;
@@ -24,7 +25,7 @@ export const FACILITY_IDLE_SECONDS = 2.5;
 export const FACILITY_ACTIVITY_SECONDS = 4;
 
 export function createYardUpgradeState(): YardUpgradeState {
-  return { wood: 0, pendingWood: 0, owned: [] };
+  return { wood: 0, pendingWood: 0, owned: [], speakerOn: false };
 }
 
 export function createFacilityLifeState(): FacilityLifeState {
@@ -52,6 +53,12 @@ export function buyUpgrade(state: YardUpgradeState, id: YardUpgradeId) {
   state.wood -= definition.cost;
   state.owned.push(id);
   return true;
+}
+
+export function toggleYardSpeaker(state: YardUpgradeState) {
+  if (!state.owned.includes('yard-speaker')) return null;
+  state.speakerOn = !state.speakerOn;
+  return state.speakerOn;
 }
 
 export function coopEntryRadius(state: YardUpgradeState) {

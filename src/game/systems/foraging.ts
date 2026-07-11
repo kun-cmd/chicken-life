@@ -11,6 +11,8 @@ export type ForagingFoodType =
   | 'cricket'
   | 'beetle'
   | 'berry'
+  | 'chive'
+  | 'cucumber'
   | 'nightBug';
 
 export interface ForagingState {
@@ -33,8 +35,26 @@ const ENERGY: Record<ForagingFoodType, number> = {
   cricket: 18,
   beetle: 14,
   berry: 10,
+  chive: 9,
+  cucumber: 18,
   nightBug: 22,
 };
+
+const LEFT_TREE_BASE_FOOD_COUNT = 4;
+const LEFT_TREE_MAX_FOOD_COUNT = 8;
+
+export function leftTreeFoodCountForFamiliarity(
+  familiarity: number,
+  variation: number,
+): number {
+  const safeFamiliarity = Math.max(0, Math.min(100, familiarity));
+  const occasionalExtra = variation < 0.35 ? 1 : 0;
+  const familiarityBonus = Math.floor(safeFamiliarity / 25);
+  return Math.min(
+    LEFT_TREE_MAX_FOOD_COUNT,
+    LEFT_TREE_BASE_FOOD_COUNT + occasionalExtra + familiarityBonus,
+  );
+}
 
 export function createForagingState(): ForagingState {
   return {
@@ -72,18 +92,19 @@ const FAMILIARITY_FOOD_THRESHOLDS: {
   food: ForagingFoodType;
   ability: keyof ChickenProfile['awakenedAbilities'];
   threshold: number;
+  minDay?: number;
 }[] = [
   { food: 'cricket', ability: 'sprint', threshold: 25 },
   { food: 'worm', ability: 'scratch', threshold: 35 },
   { food: 'beetle', ability: 'sprint', threshold: 55 },
-  { food: 'berry', ability: 'flutter', threshold: 70 },
+  { food: 'berry', ability: 'flutter', threshold: 70, minDay: 7 },
 ];
 
 export function foodPoolForFamiliarity(
   context: FamiliarityFoodPoolContext,
 ): ForagingFoodType[] {
   if (!context.dusk && context.region === 'left-tree') {
-    const pool: ForagingFoodType[] = ['grain', 'grass'];
+    const pool: ForagingFoodType[] = ['grain', 'grain', 'grass', 'grass', 'grass'];
     if (
       context.profile.awakenedAbilities.sprint &&
       context.familiarity >= 70
@@ -117,6 +138,7 @@ export function foodPoolForFamiliarity(
     if (
       context.profile.awakenedAbilities[entry.ability] &&
       context.familiarity >= entry.threshold &&
+      context.day >= (entry.minDay ?? 1) &&
       !pool.includes(entry.food)
     ) {
       pool.push(entry.food);
@@ -166,10 +188,23 @@ export function foodDisplayName(type: ForagingFoodType) {
     cricket: '蟋蟀',
     beetle: '甲虫',
     berry: '树莓',
+    chive: '韭菜',
+    cucumber: '黄瓜',
     nightBug: '夜虫',
   }[type];
 }
 
 export function isForagingFood(type: string): type is ForagingFoodType {
-  return ['grain', 'grass', 'sunflower', 'worm', 'cricket', 'beetle', 'berry', 'nightBug'].includes(type);
+  return [
+    'grain',
+    'grass',
+    'sunflower',
+    'worm',
+    'cricket',
+    'beetle',
+    'berry',
+    'chive',
+    'cucumber',
+    'nightBug',
+  ].includes(type);
 }

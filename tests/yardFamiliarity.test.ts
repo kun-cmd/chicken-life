@@ -13,11 +13,11 @@ import { restoreGameState } from '../src/game/simulation/state';
 import { DAY_ACTIVE_SECONDS } from '../src/game/systems/dayFlow';
 
 // Yard coordinates to test against:
-// COOP: { x: 1038, y: 465, width: 178, height: 132 }, center ~(1127, 531)
-// MAIN_PATH: { x: 650, y: 542, width: 196, height: 658 }
-// HOUSE_PATH: { x: 414, y: 538, width: 774, height: 104 }
-// LEFT_TREE_AREA: { x: 42, y: 806, width: 416, height: 332 }
-// PLANTING_ZONE: { x: 1040, y: 910, width: 286, height: 210 }
+// left-tree: (0, 1200) to (660, 790)
+// right-bottom: (830, 1200) to (1500, 900)
+// upper-wilds: (0, 260) to (1500, 0)
+// left-middle: x 0-660, y 260-790
+// right-middle: x 830-1500, y 260-900
 
 test('default state has all regions at zero', () => {
   const state = createYardFamiliarityState();
@@ -53,37 +53,39 @@ test('restore recovers saved familiarity values', () => {
   assert.equal(state.regions['upper-wilds'].firstSeenDay, 3);
   assert.equal(state.regions['upper-wilds'].tipShown, true);
   // Other regions stay at default
-  assert.equal(state.regions['coop-yard'].familiarity, 0);
+  assert.equal(state.regions['right-bottom'].familiarity, 0);
 });
 
-test('restore maps old pond and tree familiarity into new regions', () => {
+test('restore maps old region familiarity into new regions', () => {
   const state = restoreYardFamiliarityState({
     regions: {
       'pond-bank': { familiarity: 34, firstSeenDay: 2, tipShown: true },
       'tree-shade': { familiarity: 58, firstSeenDay: 3, tipShown: false },
+      'planting-zone': { familiarity: 46, firstSeenDay: 4, tipShown: true },
     },
   });
 
   assert.equal(state.regions['upper-wilds'].familiarity, 34);
   assert.equal(state.regions['upper-wilds'].tipShown, true);
   assert.equal(state.regions['left-tree'].familiarity, 58);
+  assert.equal(state.regions['right-bottom'].familiarity, 46);
 });
 
 test('restore clamps familiarity to [0, 100]', () => {
   const savedHigh = {
-    regions: { 'main-path': { familiarity: 999, firstSeenDay: 1, tipShown: false } },
+    regions: { 'right-bottom': { familiarity: 999, firstSeenDay: 1, tipShown: false } },
   };
-  assert.equal(restoreYardFamiliarityState(savedHigh).regions['main-path'].familiarity, 100);
+  assert.equal(restoreYardFamiliarityState(savedHigh).regions['right-bottom'].familiarity, 100);
 
   const savedLow = {
-    regions: { 'main-path': { familiarity: -5, firstSeenDay: 1, tipShown: false } },
+    regions: { 'right-bottom': { familiarity: -5, firstSeenDay: 1, tipShown: false } },
   };
-  assert.equal(restoreYardFamiliarityState(savedLow).regions['main-path'].familiarity, 0);
+  assert.equal(restoreYardFamiliarityState(savedLow).regions['right-bottom'].familiarity, 0);
 
   const savedNaN = {
-    regions: { 'main-path': { familiarity: NaN, firstSeenDay: 1, tipShown: false } },
+    regions: { 'right-bottom': { familiarity: NaN, firstSeenDay: 1, tipShown: false } },
   };
-  assert.equal(restoreYardFamiliarityState(savedNaN).regions['main-path'].familiarity, 0);
+  assert.equal(restoreYardFamiliarityState(savedNaN).regions['right-bottom'].familiarity, 0);
 });
 
 test('recording exploration increases region familiarity', () => {
@@ -105,45 +107,62 @@ test('familiarity does not exceed max', () => {
 
 test('familiarity needs several active days to max out', () => {
   const state = createYardFamiliarityState();
-  for (let day = 1; day <= 4; day++) {
+  for (let day = 1; day <= 2; day++) {
     recordRegionExploration(state, { x: 246, y: 964 }, DAY_ACTIVE_SECONDS, day);
   }
   assert.ok(state.regions['left-tree'].familiarity < 100);
 });
 
-test('movement scale is lower for unfamiliar regions', () => {
+test('movement scale is lower for unfamiliar off-path regions', () => {
   const state = createYardFamiliarityState();
-  const lowScale = movementFamiliarityScale(state, { x: 750, y: 600 });
+  const lowScale = movementFamiliarityScale(state, { x: 260, y: 968 });
   assert.ok(lowScale < 1, 'low scale should be less than 1');
   assert.ok(lowScale > 0, 'low scale should be greater than 0');
 
   // Max out and verify scale reaches 1
-  state.regions['main-path'].familiarity = 100;
-  const highScale = movementFamiliarityScale(state, { x: 750, y: 600 });
+  state.regions['left-tree'].familiarity = 100;
+  const highScale = movementFamiliarityScale(state, { x: 260, y: 968 });
   assert.equal(highScale, 1);
 });
 
+test('non-region movement scale is always 1', () => {
+  const state = createYardFamiliarityState();
+  assert.equal(movementFamiliarityScale(state, { x: 750, y: 720 }), 1);
+});
+
 test('different coordinates resolve to different regions', () => {
-  // Coop center area -> 'coop-yard'
-  assert.equal(yardRegionFor({ x: 1127, y: 531 }), 'coop-yard');
+  // Center band is not a familiarity/food region.
+  assert.equal(yardRegionFor({ x: 750, y: 720 }), null);
+  assert.equal(yardRegionFor({ x: 760, y: 420 }), null);
 
   // Upper band above the house -> 'upper-wilds'
   assert.equal(yardRegionFor({ x: 760, y: 58 }), 'upper-wilds');
 
-  // Main path -> 'main-path'
-  assert.equal(yardRegionFor({ x: 750, y: 720 }), 'main-path');
-
-  // Lower-left tree area -> 'left-tree'
+  // Lower-left shade area -> 'left-tree'
   assert.equal(yardRegionFor({ x: 260, y: 968 }), 'left-tree');
 
-  // Lower-right planting area -> 'planting-zone'
-  assert.equal(yardRegionFor({ x: 1120, y: 1000 }), 'planting-zone');
+  // Lower-right area -> 'right-bottom'
+  assert.equal(yardRegionFor({ x: 1120, y: 1000 }), 'right-bottom');
+
+  // Middle side areas
+  assert.equal(yardRegionFor({ x: 320, y: 520 }), 'left-middle');
+  assert.equal(yardRegionFor({ x: 1120, y: 520 }), 'right-middle');
 });
 
 test('regionFamiliarityFor returns correct value for point', () => {
   const state = createYardFamiliarityState();
-  state.regions['coop-yard'].familiarity = 75;
-  assert.equal(regionFamiliarityFor(state, { x: 1127, y: 531 }), 75);
+  state.regions['right-bottom'].familiarity = 75;
+  assert.equal(regionFamiliarityFor(state, { x: 1127, y: 1000 }), 75);
+  assert.equal(regionFamiliarityFor(state, { x: 750, y: 720 }), 0);
+});
+
+test('recording exploration ignores non-region points', () => {
+  const state = createYardFamiliarityState();
+  const result = recordRegionExploration(state, { x: 750, y: 720 }, 2, 1);
+  assert.equal(result.region, null);
+  assert.equal(result.firstSeen, false);
+  assert.equal(result.canShowTip, false);
+  assert.equal(state.regions['left-middle'].familiarity, 0);
 });
 
 test('canShowTip is true for unseen region, false after tip shown', () => {
@@ -170,12 +189,12 @@ test('markTipShownForRegion sets tipShown to true', () => {
 test('restore preserves tipShown flag', () => {
   const saved = {
     regions: {
-      'coop-yard': { familiarity: 30, firstSeenDay: 2, tipShown: true },
+      'right-bottom': { familiarity: 30, firstSeenDay: 2, tipShown: true },
     },
   };
   const state = restoreYardFamiliarityState(saved);
-  assert.equal(state.regions['coop-yard'].tipShown, true);
-  assert.equal(state.regions['coop-yard'].familiarity, 30);
+  assert.equal(state.regions['right-bottom'].tipShown, true);
+  assert.equal(state.regions['right-bottom'].familiarity, 30);
 });
 
 test('restoreGameState with missing yardFamiliarity defaults to zeros', () => {

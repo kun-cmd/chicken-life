@@ -12,11 +12,13 @@ import {
   ownedFacilityAt,
   resetFacilityLifeDay,
   startFacilityActivity,
+  toggleYardSpeaker,
 } from '../src/game/systems/yardUpgrades';
 
 test('core-loop upgrades use the approved dynamic-budget prices', () => {
   assert.equal(YARD_UPGRADES.find((item) => item.id === 'yard-lamp')?.cost, 2);
   assert.equal(YARD_UPGRADES.find((item) => item.id === 'water-basin')?.cost, 3);
+  assert.equal(YARD_UPGRADES.find((item) => item.id === 'yard-speaker')?.cost, 4);
   assert.equal(YARD_UPGRADES.find((item) => item.id === 'coop-roof')?.cost, 5);
 });
 
@@ -24,7 +26,7 @@ test('delivers pending wood at the next morning', () => {
   const state = createYardUpgradeState();
   state.pendingWood = 2;
   assert.equal(deliverPendingWood(state), 2);
-  assert.deepEqual(state, { wood: 2, pendingWood: 0, owned: [] });
+  assert.deepEqual(state, { wood: 2, pendingWood: 0, owned: [], speakerOn: false });
 });
 
 test('buys each upgrade once without negative wood', () => {
@@ -34,6 +36,16 @@ test('buys each upgrade once without negative wood', () => {
   assert.equal(buyUpgrade(state, 'yard-lamp'), false);
   assert.equal(buyUpgrade(state, 'water-basin'), false);
   assert.equal(state.wood, 1);
+});
+
+test('yard speaker can be toggled after it is owned', () => {
+  const state = createYardUpgradeState();
+  assert.equal(toggleYardSpeaker(state), null);
+  state.wood = 4;
+  assert.equal(buyUpgrade(state, 'yard-speaker'), true);
+  assert.equal(state.speakerOn, false);
+  assert.equal(toggleYardSpeaker(state), true);
+  assert.equal(toggleYardSpeaker(state), false);
 });
 
 test('coop upgrades ease the dusk ritual without replacing it', () => {
